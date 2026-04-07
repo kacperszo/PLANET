@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv lockfile (reproducibility handled by pyproject.toml constraints)
+uv.lock
+
+# Data directories (preprocessed HDF5 files, raw PDBbind)
+data/
+checkpoints/
+
+# Conda environments
+planet.yaml
+environment.yaml
+environment.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
