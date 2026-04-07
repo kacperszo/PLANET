@@ -2,10 +2,10 @@
 PLANET training script.
 
 Basic usage:
-    uv run train.py -d /data/pdbbind -c /data/casf2016 -k pk_v2019.json -s checkpoints/
+    uv run train.py -d /data/pdbbind -c /data/casf2016 -s checkpoints/
 
 Resume from checkpoint:
-    uv run train.py -d /data/pdbbind -c /data/casf2016 -k pk_v2019.json -s checkpoints/ \\
+    uv run train.py -d /data/pdbbind -c /data/casf2016 -s checkpoints/ \\
         --checkpoint checkpoints/PLANET.iter-50000 --initial_step 50000
 """
 import torch
@@ -33,8 +33,6 @@ if __name__ == '__main__':
                       help='PDBbind directory — expects <pdb>/<pdb>_pocket.h5 per entry')
     data.add_argument('-c', '--casf_dir', required=True,
                       help='CASF-2016 coreset directory (held out as test set)')
-    data.add_argument('-k', '--pk_json', required=True,
-                      help='JSON file mapping PDB codes to pK values (e.g. pk_v2019.json)')
     data.add_argument('--valid_frac', type=float, default=0.1,
                       help='Fraction of PDBbind entries used for validation')
 
@@ -89,14 +87,14 @@ if __name__ == '__main__':
     casf_ids = {d for d in os.listdir(args.casf_dir)}
 
     valid_dataset = ProLigDataset(
-        args.data_dir, args.pk_json, split='valid',
+        args.data_dir, split='valid',
         exclude_ids=casf_ids, valid_frac=args.valid_frac,
         batch_size=args.batch_size, shuffle=False, decoy_flag=False)
     valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False,
                               num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 
     test_dataset = ProLigDataset(
-        args.casf_dir, args.pk_json, split='all',
+        args.casf_dir, split='all',
         batch_size=args.batch_size, shuffle=False, decoy_flag=False)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False,
                              num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
@@ -131,7 +129,7 @@ if __name__ == '__main__':
     model.train()
     for epoch in range(1, 1 + args.epoch):
         train_dataset = ProLigDataset(
-            args.data_dir, args.pk_json, split='train',
+            args.data_dir, split='train',
             exclude_ids=casf_ids, valid_frac=args.valid_frac,
             batch_size=args.batch_size, shuffle=True, decoy_flag=True)
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False,

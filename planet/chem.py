@@ -244,6 +244,12 @@ class ComplexPocket():
             obj.distance_matrix = None
         return obj
 
+    @staticmethod
+    def read_pk(path: str) -> float:
+        """Read only the pK attribute from an h5 file without loading the full pocket."""
+        with h5py.File(path, 'r') as f:
+            return float(f.attrs['pK'])
+
 class Residue():
     def __init__(self,residue_content):
         residue_content = self.process_alternate(residue_content)

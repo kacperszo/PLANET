@@ -80,8 +80,6 @@ if __name__ == '__main__':
     parser.add_argument('-f','--model_file', required=True)
     parser.add_argument('-c','--casf_dir', required=True,
                         help='CASF-2016/coreset directory')
-    parser.add_argument('-k','--pk_json', required=True,
-                        help='Path to pk_v2019.json')
     parser.add_argument('-o','--out_path', required=True)
 
     parser.add_argument('--feature_dims', type=int, default=300)
@@ -98,7 +96,7 @@ if __name__ == '__main__':
                    args.pro_update_inters,args.lig_update_iters,args.pro_lig_update_iters,device).to(device)
     model.load_state_dict(torch.load(args.model_file, map_location=device, weights_only=True))
 
-    test_dataset = ProLigDataset(args.casf_dir, args.pk_json, split='all',
+    test_dataset = ProLigDataset(args.casf_dir, split='all',
                                  batch_size=16, shuffle=False, decoy_flag=False)
 
     (predicted_lig_interactions, predicted_interactions, predicted_affinities,
