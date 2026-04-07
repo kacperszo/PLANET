@@ -1,7 +1,6 @@
 import os,torch
 import torch.nn as nn
 from planet.layers import ProteinEGNN,LigandGAT,ProLig
-from planet.utils import create_var, create_var_gpu
 
 class PLANET(nn.Module):
     def __init__(self,feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,device):
@@ -20,7 +19,7 @@ class PLANET(nn.Module):
     def forward(self,res_batch,mol_batch):
         (fresidues,res_map,res_scope,alpha_coordinates) = res_batch
         fresidues = fresidues.to(self.device)
-        alpha_coordinates = create_var(alpha_coordinates)
+        alpha_coordinates = alpha_coordinates.to(self.device)
         (fatoms, fbonds, agraph, bgraph, lig_scope) = mol_batch
         fatoms = fatoms.to(self.device)
         fbonds = fbonds.to(self.device)
@@ -39,10 +38,10 @@ class PLANET(nn.Module):
         (_,_,_,_,lig_scope) = mol_batch
 
         mol_intearctions,pro_lig_interactions,pKs,pK_flags,complex_labels = targets
-        mol_intearctions = create_var(mol_intearctions)
-        pro_lig_interactions = create_var(pro_lig_interactions)
-        pKs = create_var(pKs)
-        pK_flags = create_var(pK_flags)
+        mol_intearctions = mol_intearctions.to(self.device)
+        pro_lig_interactions = pro_lig_interactions.to(self.device)
+        pKs = pKs.to(self.device)
+        pK_flags = pK_flags.to(self.device)
 
         lig_interaction_count,pro_lig_interaction_count = 0,0
         lig_interaction_loss,pro_lig_interaction_loss = [],[]
@@ -69,10 +68,11 @@ class PLANET(nn.Module):
     def compute_metrics(predictions,targets):
         predicted_lig_interactions,predicted_interactions,predicted_affinities = predictions
         mol_intearctions,pro_lig_interactions,pKs,pK_flags,_ = targets
-        mol_intearctions = create_var(mol_intearctions)
-        pro_lig_interactions = create_var(pro_lig_interactions)
-        pKs = create_var(pKs)
-        pK_flags = create_var(pK_flags)
+        device = predicted_lig_interactions.device
+        mol_intearctions = mol_intearctions.to(device)
+        pro_lig_interactions = pro_lig_interactions.to(device)
+        pKs = pKs.to(device)
+        pK_flags = pK_flags.to(device)
 
         lig_interaction_result = torch.where(predicted_lig_interactions>0.5,1.,0.)
         lig_interaction_acc = torch.mean(torch.where(lig_interaction_result==mol_intearctions,1.,0.))

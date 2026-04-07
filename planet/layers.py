@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math,sys
-from planet.utils import create_var
+import math
 from planet.utils import index_select_ND
 
 class LigandGAT(nn.Module):
@@ -159,6 +158,7 @@ class ProteinEGNN(nn.Module):
         self.update_iters = update_iters
         self.feature_dims = feature_dims
         self.device = device
+        self._mask_cache = {}
         self.res_embedding = nn.Sequential(nn.Linear(20,feature_dims,bias=False),nn.LeakyReLU(0.1))
         self.linear_e = nn.Sequential(
             nn.Linear(2*feature_dims+1,feature_dims),
@@ -199,9 +199,12 @@ class ProteinEGNN(nn.Module):
                 m = self.linear_e(m_input)
                 #coordinates_batch = coordinates_batch + C * torch.sum(coor_diff*self.linear_x(m),dim=1)
                 e = self.linear_inf(m)
-                mask = torch.ones([res_count,res_count]) - torch.eye(res_count)
-                mask = mask.unsqueeze(-1).to(self.device)
-                e = e * mask
+                if res_count not in self._mask_cache:
+                    self._mask_cache[res_count] = (
+                        (torch.ones([res_count,res_count]) - torch.eye(res_count))
+                        .unsqueeze(-1).to(self.device)
+                    )
+                e = e * self._mask_cache[res_count]
                 m_pre = torch.sum(m*e,dim=1)
                 fresidues_batch = self.linear_h(torch.cat([fresidues_batch,m_pre],dim=-1)) + fresidues_batch
                 fresidues_new.append(fresidues_batch)
@@ -223,9 +226,13 @@ class ProteinEGNN(nn.Module):
             ],dim=-1)
             m = self.linear_e(m_input)
             e = self.linear_inf(m)
-            mask = torch.ones([fresidues.shape[0],fresidues.shape[0]]) - torch.eye(fresidues.shape[0])
-            mask = mask.unsqueeze(-1).to(self.device)
-            e = e * mask
+            n = fresidues.shape[0]
+            if n not in self._mask_cache:
+                self._mask_cache[n] = (
+                    (torch.ones([n,n]) - torch.eye(n))
+                    .unsqueeze(-1).to(self.device)
+                )
+            e = e * self._mask_cache[n]
             m_pre = torch.sum(m*e,dim=1)
             fresidues = self.linear_h(torch.cat([fresidues,m_pre],dim=-1)) + fresidues
         return fresidues
