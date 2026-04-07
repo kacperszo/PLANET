@@ -27,8 +27,7 @@ def concordance_index(predicted, actual):
                 concordant += 0.5
     return concordant / pairs if pairs > 0 else 0.0
 
-def test_PLANET(PLANET,test_pickle):
-    test_dataset = ProLigDataset(test_pickle,batch_size=16,shuffle=False,decoy_flag=False)
+def test_PLANET(PLANET, test_dataset):
     test_loader = DataLoader(test_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
     bonded_pairs = test_dataset.get_bonded_atom_pairs()
     PLANET.eval()
@@ -76,7 +75,10 @@ def test_PLANET(PLANET,test_pickle):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-f','--PLANET_file',required=True)
-    parser.add_argument('-t','--test',required=True)
+    parser.add_argument('-c','--casf_dir',required=True,
+                        help='CASF-2016/coreset directory')
+    parser.add_argument('-k','--pk_json',required=True,
+                        help='Path to pk_v2019.json')
     parser.add_argument('-o','--out_path',required=True)
     
     parser.add_argument('-s','--feature_dims', type=int, default=300)
@@ -93,9 +95,13 @@ if __name__ == '__main__':
         args.pro_update_inters,args.lig_update_iters,args.pro_lig_update_iters
     PLANET = PLANET(feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,'cuda').cuda()
     PLANET.load_state_dict(torch.load(args.PLANET_file, weights_only=True))
-    
+
+    from PLANET_datautils import ProLigDataset
+    test_dataset = ProLigDataset(args.casf_dir, args.pk_json, split='all',
+                                 batch_size=16, shuffle=False, decoy_flag=False)
+
     predicted_lig_interactions,predicted_interactions,predicted_affinities,\
-        ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(PLANET,args.test)
+        ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(PLANET, test_dataset)
     with open(args.out_path,'wb') as pickle_out:
         out_data = [predicted_lig_interactions,predicted_interactions,predicted_affinities,\
             ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs]

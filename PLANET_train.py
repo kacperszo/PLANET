@@ -12,10 +12,13 @@ from rdkit import RDLogger
 if __name__ == '__main__':
     RDLogger.DisableLog('rdApp.*')
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t','--train', required=True)
-    parser.add_argument('-v','--valid',required=True)
-    parser.add_argument('-te','--test',required=True)
-    parser.add_argument('-d','--save_dir', required=True)
+    parser.add_argument('-d','--data_dir', required=True,
+                        help='PDBbind directory with <pdb>/<pdb>_pocket.pkl structure')
+    parser.add_argument('-c','--casf_dir', required=True,
+                        help='CASF-2016/coreset directory (excluded from train/valid, used as test)')
+    parser.add_argument('-k','--pk_json', required=True,
+                        help='Path to pk_v2019.json')
+    parser.add_argument('-s','--save_dir', required=True)
 
     parser.add_argument('-s','--feature_dims', type=int, default=300)
     parser.add_argument('-n','--nheads', type=int, default=8)
@@ -43,10 +46,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    valid_dataset = ProLigDataset(args.valid,args.batch_size,shuffle=False,decoy_flag=False)
+    casf_ids = {d for d in os.listdir(args.casf_dir)}
+
+    valid_dataset = ProLigDataset(args.data_dir, args.pk_json, split='valid',
+                                  exclude_ids=casf_ids, batch_size=args.batch_size,
+                                  shuffle=False, decoy_flag=False)
     valid_loader = DataLoader(valid_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
 
-    test_dataset = ProLigDataset(args.test,args.batch_size,shuffle=False,decoy_flag=False)
+    test_dataset = ProLigDataset(args.casf_dir, args.pk_json, split='all',
+                                 batch_size=args.batch_size, shuffle=False, decoy_flag=False)
     test_loader = DataLoader(test_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
 
 
@@ -72,7 +80,9 @@ if __name__ == '__main__':
 
     PLANET.train()
     for epoch in range(1,1+args.epoch):
-        train_dataset = ProLigDataset(args.train,args.batch_size,shuffle=True,decoy_flag=True)
+        train_dataset = ProLigDataset(args.data_dir, args.pk_json, split='train',
+                                      exclude_ids=casf_ids, batch_size=args.batch_size,
+                                      shuffle=True, decoy_flag=True)
         train_loader = DataLoader(train_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
         
         for (res_feature_batch,mol_feature_batch,targets) in train_loader:

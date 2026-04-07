@@ -46,8 +46,10 @@ def parse_pk_json(json_path):
 
 
 def collect_records(data_dir, pk_dict, exclude_set=None):
-    """Walk data_dir, return list of [pkl_path, pK] for complexes with a pocket pkl."""
+    """Walk data_dir, return list of [pkl_path, pK] for complexes with a pocket pkl.
+    pkl_path is stored as absolute path resolved at build time."""
     records = []
+    data_dir = os.path.abspath(data_dir)
     for pdb in os.listdir(data_dir):
         if exclude_set and pdb.lower() in exclude_set:
             continue
