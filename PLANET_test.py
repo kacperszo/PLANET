@@ -7,6 +7,26 @@ import numpy as np
 import scipy.stats as stats
 import argparse,math,rdkit,os,pickle
 
+
+def concordance_index(predicted, actual):
+    """Concordance Index (CI): fraction of pairs where ranking is correct."""
+    predicted = np.asarray(predicted, dtype=np.float64)
+    actual = np.asarray(actual, dtype=np.float64)
+    pairs = 0
+    concordant = 0.0
+    for i in range(len(actual)):
+        for j in range(i + 1, len(actual)):
+            if actual[i] == actual[j]:
+                continue
+            pairs += 1
+            diff_pred = predicted[i] - predicted[j]
+            diff_act = actual[i] - actual[j]
+            if diff_pred * diff_act > 0:
+                concordant += 1.0
+            elif diff_pred == 0:
+                concordant += 0.5
+    return concordant / pairs if pairs > 0 else 0.0
+
 def test_PLANET(PLANET,test_pickle):
     test_dataset = ProLigDataset(test_pickle,batch_size=16,shuffle=False,decoy_flag=False)
     test_loader = DataLoader(test_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
@@ -43,10 +63,12 @@ def test_PLANET(PLANET,test_pickle):
     pKs = np.concatenate(pKs,axis=0)
     
     MAE = np.mean(np.abs(predicted_affinities-pKs))
-    RMSE = np.sqrt(np.sum(np.square(predicted_affinities-pKs)) / len(predicted_affinities))
-    P_correlation,P_pvalue = stats.stats.pearsonr(predicted_affinities,pKs)
-    S_correlation,S_pvalue =  stats.spearmanr(predicted_affinities,pKs)
-    print('MAE:{:3f}\tRMSE:{:3f}\tPearson:{:3f}\tP_pvalue:{:3f}\tSpearman:{:3f}\tS_pvalue:{:3f}'.format(MAE,RMSE,P_correlation,P_pvalue,S_correlation,S_pvalue))
+    RMSE = np.sqrt(np.mean(np.square(predicted_affinities-pKs)))
+    P_correlation, P_pvalue = stats.pearsonr(predicted_affinities, pKs)
+    S_correlation, S_pvalue = stats.spearmanr(predicted_affinities, pKs)
+    CI = concordance_index(predicted_affinities, pKs)
+    print('MAE:{:.3f}\tRMSE:{:.3f}\tPearson R:{:.3f}\tSpearman:{:.3f}\tCI:{:.3f}'.format(
+        MAE, RMSE, P_correlation, S_correlation, CI))
 
     return predicted_lig_interactions,predicted_interactions,predicted_affinities, \
             ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs
@@ -70,7 +92,7 @@ if __name__ == '__main__':
     feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters = args.feature_dims,args.nheads,args.key_dims,args.value_dims,\
         args.pro_update_inters,args.lig_update_iters,args.pro_lig_update_iters
     PLANET = PLANET(feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,'cuda').cuda()
-    PLANET.load_state_dict(torch.load(args.PLANET_file))
+    PLANET.load_state_dict(torch.load(args.PLANET_file, weights_only=True))
     
     predicted_lig_interactions,predicted_interactions,predicted_affinities,\
         ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(PLANET,args.test)

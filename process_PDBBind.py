@@ -23,8 +23,6 @@ def process_PDBBind(args):
             pickle.dump(pocket, f, pickle.HIGHEST_PROTOCOL) 
     except Exception as e:
         pass
-        #print(pdb_name)
-        #os.system('cp -r /disk1/aquila/PDBbind2020_all/origin/{}/ /disk1/aquila/PDBbind2020_repair/'.format(pdb_name))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

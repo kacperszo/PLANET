@@ -83,9 +83,6 @@ if __name__ == "__main__":
             if os.path.exists(os.path.join(pdb_dir,sub_folder,pdb_code,'{}_pocket.pkl'.format(pdb_code))):
                 with open(os.path.join(pdb_dir,sub_folder,pdb_code,'{}_pocket.pkl'.format(pdb_code)),'rb') as f:
                     pocket = pickle.load(f)
-                    #if pocket.distance_matrix.shape[0] == 0:
-                        #print(pdb_code)
-                        #os.system('cp -r /disk1/aquila/PDBbind2020/{}/ /disk1/aquila/test_PDBbind'.format(pdb_code))
                     ###for PDBbind_extend which is not checked,some ligands may not in a 'pocket'
                 if sub_folder == 'extend' and len(pocket.pocket_residues) >= 30:
                     try:
