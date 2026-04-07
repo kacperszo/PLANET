@@ -25,84 +25,61 @@ By default this pulls PyTorch with **CUDA 12.1** support. Edit the index URL in 
 
 ---
 
-## Quick start — virtual screening
-
-A demo is included (`demo/`): an ADRB2 receptor (`adrb2.pdb`), its crystal ligand (`adrb2_ligand.sdf`) used to define the binding pocket, and a set of molecules to score (`mols.sdf`).
-
-```bash
-cd demo
-uv run ../PLANET_run.py -p adrb2.pdb -l adrb2_ligand.sdf -m mols.sdf
-```
-
-Outputs `result.csv` and `result.sdf` with predicted affinities (pK units).
-
-### Inference arguments
-
-| Flag | Description |
-|------|-------------|
-| `-p / --protein` | Protein structure file (`.pdb`) |
-| `-l / --ligand` | Crystal ligand SDF — defines pocket centre; overrides `-x/-y/-z` |
-| `-x/-y/-z` | Pocket centre coordinates (alternative to `-l`) |
-| `-m / --mol_file` | Molecules to score (`.sdf` or `.smi`) |
-| `--prefix` | Output file prefix (default: `result`) |
-
-### Preparing input files
-
-- **Protein:** fix broken residues and assign protonation states (e.g. Maestro `prepwizard`). **α-carbon of every residue must be present** — PLANET uses Cα positions for the protein graph.
-- **Ligands:** add hydrogens and assign ionisation states (e.g. Maestro `epik`, or RDKit).
-
----
-
 ## Training on PDBbind
 
 ### Prerequisites
 
 - PDBbind general set (v2019 recommended) — available at <http://pdbbind.org.cn/>
-- CASF-2016 core set (used as held-out test set throughout training)
-- A JSON file mapping PDB codes to pK values — generate with:
-
-```bash
-uv run scripts/make_pk_json.py --index $PDBBIND/index/INDEX_general_PL_data.2019 \
-    --out pk_v2019.json
-```
+- CASF-2016 core set (used as the held-out test set throughout training)
 
 ### Step 1 — preprocess structures
 
 Converts each PDBbind entry into a self-contained HDF5 pocket file (`<pdb>_pocket.h5`).
-Run in parallel with `-n` workers:
+pK values are parsed directly from the PDBbind INDEX file — no intermediate JSON needed.
 
 ```bash
-uv run process_PDBBind.py \
+uv run preprocess.py \
     -d $PDBBIND_DIR \
-    -n 16 \
-    -k pk_v2019.json
+    -i $PDBBIND_DIR/index/INDEX_general_PL_data.2019 \
+    -n 16
 ```
 
-Do the same for the CASF-2016 core set directory:
+Do the same for the CASF-2016 core set:
 
 ```bash
-uv run process_PDBBind.py \
+uv run preprocess.py \
     -d $CASF_DIR \
-    -n 8 \
-    -k pk_v2019.json
+    -i $PDBBIND_DIR/index/INDEX_general_PL_data.2019 \
+    -n 8
 ```
 
-Each entry directory should contain `<pdb>_ligand.sdf`, `<pdb>_protein.pdb`, and optionally `<pdb>_decoy.sdf`.  
+Each entry directory should contain `<pdb>_ligand.sdf`, `<pdb>_protein.pdb`, and optionally `<pdb>_decoy.sdf`.
 After preprocessing, each directory will also contain `<pdb>_pocket.h5`.
 
-> **Note:** The HDF5 format (via `h5py`) replaced the previous pickle-based format. Existing `_pocket.pkl` files are no longer compatible — rerun `process_PDBBind.py` to regenerate.
+- **Protein:** fix broken residues and assign protonation states (e.g. Maestro `prepwizard`). **α-carbon of every residue must be present** — PLANET uses Cα positions for the protein graph.
+- **Ligands:** add hydrogens and assign ionisation states (e.g. Maestro `epik`, or RDKit).
 
 ### Step 2 — train
 
-The dataset is built on-the-fly from the directory structure — no intermediate index files needed.
+The dataset is built on-the-fly from the HDF5 files — no intermediate index files needed.
 CASF entries are automatically excluded from train/valid and used as the running test set.
 
 ```bash
-uv run PLANET_train.py \
+uv run train.py \
     -d $PDBBIND_DIR \
     -c $CASF_DIR \
-    -k pk_v2019.json \
     -s checkpoints/
+```
+
+To resume from a checkpoint:
+
+```bash
+uv run train.py \
+    -d $PDBBIND_DIR \
+    -c $CASF_DIR \
+    -s checkpoints/ \
+    --checkpoint checkpoints/PLANET.iter-50000 \
+    --initial_step 50000
 ```
 
 Key training arguments:
@@ -111,24 +88,68 @@ Key training arguments:
 |------|---------|-------------|
 | `--epoch` | 250 | Number of epochs |
 | `--batch_size` | 16 | Complexes per batch |
-| `--lr` | 1e-4 | Learning rate |
-| `--anneal_iter` | 20000 | LR decay interval (after step 60k) |
+| `--lr` | 1e-4 | Initial learning rate |
+| `--anneal_iter` | 20000 | LR decay interval in steps (after step 60k) |
 | `--save_iter` | 5000 | Checkpoint + eval interval (steps) |
 | `--print_iter` | 200 | Log interval (steps) |
-| `--initial_step` | 0 | Resume from step (pair with `--load_epoch`) |
+| `--valid_frac` | 0.1 | Fraction of PDBbind held out for validation |
+| `--checkpoint` | — | Path to checkpoint to resume from |
+| `--initial_step` | 0 | Global step to start from (set when resuming) |
 
 ### Step 3 — evaluate on CASF-2016
 
 ```bash
-uv run PLANET_test.py \
+uv run evaluate.py \
     -f checkpoints/PLANET.iter-XXXXX \
     -c $CASF_DIR \
-    -k pk_v2019.json \
     -o results/casf
 ```
 
-Prints MAE, RMSE, Pearson R, Spearman ρ, and Concordance Index (CI).  
+Prints MAE, RMSE, Pearson R, Spearman ρ, and Concordance Index (CI).
 Saves predictions to `results/casf.h5` (arrays) and `results/casf_meta.json` (scopes + bonded pairs).
+
+---
+
+## Virtual screening
+
+Score a library of molecules against a protein pocket using a trained checkpoint.
+The pocket can be defined either by a crystal ligand SDF or by explicit coordinates.
+
+```bash
+# pocket defined by crystal ligand
+uv run screen.py \
+    -p protein.pdb \
+    -l crystal_ligand.sdf \
+    -m library.sdf \
+    -w checkpoints/PLANET.iter-100000 \
+    --prefix result
+
+# pocket defined by centre coordinates
+uv run screen.py \
+    -p protein.pdb \
+    -x 12.3 -y 45.6 -z 78.9 \
+    -m library.smi \
+    -w checkpoints/PLANET.iter-100000 \
+    --prefix result
+```
+
+Outputs `result.csv` and `result.sdf` with predicted affinities (pK units).
+
+`screen.py` is also installed as a `planet-screen` entry point:
+
+```bash
+planet-screen -p protein.pdb -l ligand.sdf -m library.sdf \
+    -w checkpoints/PLANET.iter-100000
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p / --protein` | Protein structure file (`.pdb`) |
+| `-l / --ligand` | Crystal ligand SDF — defines pocket centre |
+| `-x/-y/-z` | Pocket centre coordinates (alternative to `-l`) |
+| `-m / --mol_file` | Molecules to score (`.sdf` or `.smi`) |
+| `-w / --checkpoint` | Trained model checkpoint |
+| `--prefix` | Output file prefix (default: `result`) |
 
 ---
 
@@ -151,18 +172,14 @@ Each preprocessed complex is stored as `<pdb>_pocket.h5` (gzip-compressed HDF5):
 ## Repository layout
 
 ```
-PLANET_run.py          — virtual screening inference
-PLANET_train.py        — training loop
-PLANET_test.py         — CASF-2016 evaluation
-PLANET_model.py        — model definition (PLANET nn.Module)
-PLANET_datautils.py    — ProLigDataset (on-the-fly HDF5 loader)
-chemutils.py           — featurisation, ComplexPocket, HDF5 I/O
-layers.py              — ProteinEGNN, LigandGAT, ProLig layers
-nnutils.py             — tensor utilities
-process_PDBBind.py     — preprocessing (pkl → h5 per complex)
-scripts/
-  make_pk_json.py      — build pk_v2019.json from PDBbind index
-  build_datasets_v2019.py — (legacy) static dataset builder, superseded
-demo/                  — example protein + ligands for quick test
-PLANET.param           — pretrained weights
+train.py          — training loop
+evaluate.py       — CASF-2016 evaluation
+screen.py         — virtual screening inference
+preprocess.py     — preprocessing: PDBbind → per-complex HDF5
+planet/
+  model.py        — PLANET nn.Module
+  data.py         — ProLigDataset (on-the-fly HDF5 loader)
+  chem.py         — featurisation, ComplexPocket, HDF5 I/O
+  layers.py       — ProteinEGNN, LigandGAT, ProLig layers
+  utils.py        — tensor utilities
 ```
