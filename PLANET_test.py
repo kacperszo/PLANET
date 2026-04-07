@@ -5,7 +5,8 @@ from PLANET_model import PLANET
 from PLANET_datautils import ProLigDataset
 import numpy as np
 import scipy.stats as stats
-import argparse,math,rdkit,os,pickle
+import argparse,rdkit,os,json
+import h5py
 
 
 def concordance_index(predicted, actual):
@@ -107,7 +108,16 @@ if __name__ == '__main__':
 
     predicted_lig_interactions,predicted_interactions,predicted_affinities,\
         ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(model, test_dataset)
-    with open(args.out_path,'wb') as pickle_out:
-        out_data = [predicted_lig_interactions,predicted_interactions,predicted_affinities,\
-            ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs]
-        pickle.dump(out_data,pickle_out,protocol=pickle.HIGHEST_PROTOCOL)
+
+    out_h5 = args.out_path if args.out_path.endswith('.h5') else args.out_path + '.h5'
+    out_json = out_h5[:-3] + '_meta.json'
+    with h5py.File(out_h5, 'w') as f:
+        f.create_dataset('predicted_lig_interactions', data=predicted_lig_interactions)
+        f.create_dataset('predicted_interactions',     data=predicted_interactions)
+        f.create_dataset('predicted_affinities',       data=predicted_affinities)
+        f.create_dataset('ligand_interactions',        data=ligand_interactions)
+        f.create_dataset('pro_lig_interactions',       data=pro_lig_interactions)
+        f.create_dataset('pKs',                        data=pKs)
+    with open(out_json, 'w') as f:
+        json.dump({'lig_scopes': lig_scopes, 'res_scopes': res_scopes,
+                   'bonded_pairs': bonded_pairs}, f)

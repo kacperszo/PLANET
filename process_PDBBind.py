@@ -1,6 +1,5 @@
-import os,argparse,pickle,random,json
+import os,argparse,json
 from rdkit import Chem
-from rdkit.RDLogger import ERROR
 from chemutils import ComplexPocket
 from multiprocessing import Pool
 
@@ -18,9 +17,8 @@ def process_PDBBind(args):
         pK=0
     try:
         pocket = ComplexPocket(protein_pdb,ligand_sdf,pK,decoy_sdf)
-        pocket_pkl = os.path.join(record_dir,'{}_pocket.pkl'.format(pdb_name))
-        with open(pocket_pkl,'wb') as f:
-            pickle.dump(pocket, f, pickle.HIGHEST_PROTOCOL)
+        pocket_h5 = os.path.join(record_dir,'{}_pocket.h5'.format(pdb_name))
+        pocket.save_h5(pocket_h5)
     except Exception as e:
         print(f"Skipping {pdb_name}: {e}")
 

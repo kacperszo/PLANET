@@ -1,6 +1,7 @@
 from operator import le
 import pandas as pd
 import rdkit,os
+import h5py
 import rdkit.Chem as Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import Descriptors
@@ -117,6 +118,21 @@ class ProteinPocket():
             except:
                 continue
 
+class _ResidueProxy:
+    """Lightweight stand-in for Residue when loading from .h5 (no pickle)."""
+    __slots__ = ('_feature', '_alpha_pos')
+
+    def __init__(self, feature: np.ndarray, alpha_pos: np.ndarray):
+        self._feature = feature.reshape(1, -1).astype(np.float32)
+        self._alpha_pos = alpha_pos.reshape(1, 3).astype(np.float32)
+
+    def get_feature(self) -> np.ndarray:
+        return self._feature
+
+    def get_alpha_position(self) -> np.ndarray:
+        return self._alpha_pos
+
+
 class ComplexPocket():
     def __init__(self,protein_pdb,ligand_sdf,pK=0,decoy_sdf=None):
         with open(protein_pdb,'r') as pdb_file:
@@ -181,6 +197,51 @@ class ComplexPocket():
         ),axis=-1,keepdims=True))
         distance_matrix = np.concatenate([mass_matrix,alpha_matrix],axis=-1)
         return distance_matrix
+
+    def save_h5(self, path: str) -> None:
+        """Serialize pocket to an HDF5 file — no pickle, format-stable."""
+        alpha_coords = np.concatenate(
+            [r.get_alpha_position() for r in self.pocket_residues], axis=0
+        ).astype(np.float32)  # [n_res, 3]
+        with h5py.File(path, 'w') as f:
+            f.attrs['pK'] = self.pK
+            f.attrs['decoys_count'] = self.decoys_count
+            f.create_dataset('res_features', data=self.res_features.astype(np.float32))
+            f.create_dataset('alpha_coordinates', data=alpha_coords)
+            f.create_dataset('pro_lig_interaction', data=self.pro_lig_interaction.astype(np.float32))
+            f.create_dataset('ligand_mol', data=np.frombuffer(self.ligand.mol.ToBinary(), dtype=np.uint8))
+            decoys = f.create_group('decoys')
+            for i, decoy in enumerate(self.decoys):
+                decoys.create_dataset(str(i), data=np.frombuffer(decoy.mol.ToBinary(), dtype=np.uint8))
+
+    @classmethod
+    def load_h5(cls, path: str) -> 'ComplexPocket':
+        """Deserialize pocket saved with save_h5 — no pickle."""
+        with h5py.File(path, 'r') as f:
+            obj = cls.__new__(cls)
+            obj.pK = float(f.attrs['pK'])
+
+            res_features = f['res_features'][:]       # [n_res, 20]
+            alpha_coords = f['alpha_coordinates'][:]  # [n_res, 3]
+            obj.res_features = res_features
+            obj.res_count = len(res_features)
+
+            obj.pocket_residues = [
+                _ResidueProxy(res_features[i], alpha_coords[i])
+                for i in range(obj.res_count)
+            ]
+
+            obj.pro_lig_interaction = f['pro_lig_interaction'][:]  # [n_atoms, n_res]
+            obj.ligand = Mol(Chem.Mol(f['ligand_mol'][:].tobytes()))
+
+            decoys_count = int(f.attrs['decoys_count'])
+            obj.decoys = [
+                Mol(Chem.Mol(f['decoys'][str(i)][:].tobytes()))
+                for i in range(decoys_count)
+            ]
+            obj.decoys_count = decoys_count
+            obj.distance_matrix = None
+        return obj
 
 class Residue():
     def __init__(self,residue_content):

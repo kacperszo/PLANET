@@ -1,4 +1,4 @@
-import json, os, pickle, random
+import json, os, random
 from typing import List, Optional, Set
 from torch.utils.data import Dataset
 from chemutils import ComplexPocket, tensorize_all
@@ -43,11 +43,11 @@ class ProLigDataset(Dataset):
         for pdb in os.listdir(data_dir):
             if pdb.lower() in exclude_ids:
                 continue
-            pkl_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.pkl')
-            if not os.path.exists(pkl_path):
+            h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
+            if not os.path.exists(h5_path):
                 continue
             pK = pk_data.get(pdb.lower(), 0.0)
-            records.append((pkl_path, pK))
+            records.append((h5_path, pK))
 
         # deterministic train/valid split
         rng = random.Random(seed)
@@ -91,9 +91,8 @@ class ProLigDataset(Dataset):
 
     def _tensorize(self, idx):
         pocket_batch = []
-        for (pkl_path, _) in self.batches[idx]:
-            with open(pkl_path, 'rb') as f:
-                pocket_batch.append(pickle.load(f))
+        for (h5_path, _) in self.batches[idx]:
+            pocket_batch.append(ComplexPocket.load_h5(h5_path))
         res_feature_batch, mol_feature_batch, mol_interactions, pro_lig_interactions, pKs, pK_flags, complex_labels = \
             tensorize_all(pocket_batch, self.decoy_flag)
         return res_feature_batch, mol_feature_batch, \
@@ -101,8 +100,7 @@ class ProLigDataset(Dataset):
 
     def get_bonded_atom_pairs(self) -> List[List[tuple]]:
         bonded_pairs = []
-        for (pkl_path, _) in chain(*self.batches):
-            with open(pkl_path, 'rb') as f:
-                pocket: ComplexPocket = pickle.load(f)
-                bonded_pairs.append(pocket.ligand.get_bonded_atoms())
+        for (h5_path, _) in chain(*self.batches):
+            pocket = ComplexPocket.load_h5(h5_path)
+            bonded_pairs.append(pocket.ligand.get_bonded_atoms())
         return bonded_pairs
