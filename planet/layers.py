@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math,sys
-from nnutils import create_var
-from nnutils import index_select_ND
+from planet.utils import create_var
+from planet.utils import index_select_ND
 
 class ProteinGAT(nn.Module):
     def __init__(self,feature_dims,nheads,key_dims,value_dims,update_iters,device):

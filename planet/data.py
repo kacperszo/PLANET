@@ -1,7 +1,7 @@
 import json, os, random
 from typing import List, Optional, Set
 from torch.utils.data import Dataset
-from chemutils import ComplexPocket, tensorize_all
+from planet.chem import ComplexPocket, tensorize_all
 import numpy as np
 from itertools import chain
 
