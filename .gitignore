@@ -15,7 +15,12 @@ uv.lock
 
 # Data directories (preprocessed HDF5 files, raw PDBbind)
 data/
+
+# Checkpoints and trained weights
 checkpoints/
+*.param
+*.pt
+*.pth
 
 # Conda environments
 planet.yaml

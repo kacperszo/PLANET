@@ -15,11 +15,13 @@ if __name__ == '__main__':
     parser.add_argument('-z','--center_z', default=None, type=float)
     parser.add_argument('-m','--mol_file', required=True,
                         help='Molecules to score (.sdf or .smi)')
+    parser.add_argument('-w','--checkpoint', required=True,
+                        help='Path to trained model checkpoint (e.g. checkpoints/PLANET.iter-100000)')
     parser.add_argument('--prefix', default='result',
                         help='Output file prefix (default: result)')
     args = parser.parse_args()
 
     predicted_affinities, mol_names, smis = workflow(
-        args.protein, args.mol_file, args.ligand,
+        args.protein, args.mol_file, args.checkpoint, args.ligand,
         args.center_x, args.center_y, args.center_z)
     result_to_csv_sdf(predicted_affinities, mol_names, smis, args.prefix)

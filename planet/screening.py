@@ -8,9 +8,9 @@ from planet.chem import ProteinPocket, mol_batch_to_graph
 
 
 class PlanetEstimator:
-    def __init__(self, device):
+    def __init__(self, checkpoint, device):
         self.model = PLANET(300, 8, 300, 300, 3, 10, 1, device=device)
-        self.model.load_parameters()
+        self.model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
         for param in self.model.parameters():
             param.requires_grad = False
         self.model.eval()
@@ -90,9 +90,9 @@ class VS_SMI_Dataset(Dataset):
         return [contents[i:i + self.batch_size] for i in range(0, len(contents), self.batch_size)]
 
 
-def workflow(protein_pdb, mol_file, ligand_sdf=None, centeriod_x=None, centeriod_y=None, centeriod_z=None):
+def workflow(protein_pdb, mol_file, checkpoint, ligand_sdf=None, centeriod_x=None, centeriod_y=None, centeriod_z=None):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    estimator = PlanetEstimator(device)
+    estimator = PlanetEstimator(checkpoint, device)
     estimator.model.to(device)
 
     if ligand_sdf is not None:
@@ -140,10 +140,12 @@ def main_cli():
     parser.add_argument('-y','--center_y', default=None, type=float)
     parser.add_argument('-z','--center_z', default=None, type=float)
     parser.add_argument('-m','--mol_file', required=True)
+    parser.add_argument('-w','--checkpoint', required=True,
+                        help='Path to trained model checkpoint (e.g. checkpoints/PLANET.iter-100000)')
     parser.add_argument('--prefix', default='result')
     args = parser.parse_args()
     predicted_affinities, mol_names, smis = workflow(
-        args.protein, args.mol_file, args.ligand,
+        args.protein, args.mol_file, args.checkpoint, args.ligand,
         args.center_x, args.center_y, args.center_z)
     result_to_csv_sdf(predicted_affinities, mol_names, smis, args.prefix)
 
