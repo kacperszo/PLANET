@@ -81,9 +81,9 @@ if __name__ == '__main__':
                         help='Path to pk_v2019.json')
     parser.add_argument('-o','--out_path',required=True)
     
-    parser.add_argument('-s','--feature_dims', type=int, default=300)
+    parser.add_argument('--feature_dims', type=int, default=300)
     parser.add_argument('-n','--nheads', type=int, default=8)
-    parser.add_argument('-k','--key_dims', type=int, default=300)
+    parser.add_argument('--key_dims', type=int, default=300)
     parser.add_argument('-va','--value_dims', type=int, default=300)
 
     parser.add_argument('-pu','--pro_update_inters', type=int, default=3)
@@ -91,17 +91,22 @@ if __name__ == '__main__':
     parser.add_argument('-pl','--pro_lig_update_iters',type=int,default=1)
     args = parser.parse_args()
 
-    feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters = args.feature_dims,args.nheads,args.key_dims,args.value_dims,\
-        args.pro_update_inters,args.lig_update_iters,args.pro_lig_update_iters
-    PLANET = PLANET(feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,'cuda').cuda()
-    PLANET.load_state_dict(torch.load(args.PLANET_file, weights_only=True))
+    feature_dims = args.feature_dims
+    nheads = args.nheads
+    key_dims = args.key_dims
+    value_dims = args.value_dims
+    pro_update_inters = args.pro_update_inters
+    lig_update_iters = args.lig_update_iters
+    pro_lig_update_iters = args.pro_lig_update_iters
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = PLANET(feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,device).to(device)
+    model.load_state_dict(torch.load(args.PLANET_file, map_location=device, weights_only=True))
 
-    from PLANET_datautils import ProLigDataset
     test_dataset = ProLigDataset(args.casf_dir, args.pk_json, split='all',
                                  batch_size=16, shuffle=False, decoy_flag=False)
 
     predicted_lig_interactions,predicted_interactions,predicted_affinities,\
-        ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(PLANET, test_dataset)
+        ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs = test_PLANET(model, test_dataset)
     with open(args.out_path,'wb') as pickle_out:
         out_data = [predicted_lig_interactions,predicted_interactions,predicted_affinities,\
             ligand_interactions,pro_lig_interactions,pKs,lig_scopes,res_scopes,bonded_pairs]

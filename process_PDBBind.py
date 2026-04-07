@@ -20,9 +20,9 @@ def process_PDBBind(args):
         pocket = ComplexPocket(protein_pdb,ligand_sdf,pK,decoy_sdf)
         pocket_pkl = os.path.join(record_dir,'{}_pocket.pkl'.format(pdb_name))
         with open(pocket_pkl,'wb') as f:
-            pickle.dump(pocket, f, pickle.HIGHEST_PROTOCOL) 
+            pickle.dump(pocket, f, pickle.HIGHEST_PROTOCOL)
     except Exception as e:
-        pass
+        print(f"Skipping {pdb_name}: {e}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

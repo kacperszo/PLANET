@@ -60,11 +60,17 @@ class ProLigDataset(Dataset):
         # 'all' → keep everything
 
         if shuffle:
-            while True:
-                random.shuffle(records)
+            max_attempts = 1000
+            for attempt in range(max_attempts):
+                rng.shuffle(records)
                 batches = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
                 if self._check(batches):
                     break
+            else:
+                raise RuntimeError(
+                    f"Could not build valid batches after {max_attempts} shuffle attempts. "
+                    "Too many records with pK=0?"
+                )
         else:
             batches = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
 

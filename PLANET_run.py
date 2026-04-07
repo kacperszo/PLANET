@@ -127,7 +127,8 @@ def workflow(protein_pdb,mol_file,ligand_sdf=None,centeriod_x=None,centeriod_y=N
                 predicted_affinities.append((predicted_affinity.view([-1]).cpu().numpy()))
                 smis.extend(smi_batch)
                 mol_names.extend(mol_name)
-            except:
+            except Exception as e:
+                print(f"Skipping batch: {e}")
                 continue
     predicted_affinities = np.concatenate(predicted_affinities)
     return predicted_affinities,mol_names,smis
