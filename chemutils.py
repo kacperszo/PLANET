@@ -199,7 +199,13 @@ class Residue():
         return self.mass_center
 
     def get_alpha_position(self):
-        return self.alpha_position
+        ap = np.asarray(self.alpha_position, dtype=np.float32).flatten()
+        if ap.size >= 3:
+            return ap[:3].reshape(1, 3)
+        mc = np.asarray(self.mass_center, dtype=np.float32).flatten()
+        if mc.size >= 3:
+            return mc[:3].reshape(1, 3)
+        return np.zeros((1, 3), dtype=np.float32)  # ostatni fallback
 
     def process_alternate(self,contents):
         alternate_flag = list(set([line[16] for line in contents if line[16]!=" "]))
@@ -247,9 +253,9 @@ def random_ligand_decoy(protein_pockets,decoy_flag):
             complex_labels = []
             for pocket in protein_pockets:
                 if pocket.pK != 0:
-                    complex_labels.append(int(np.random.choice([0,1],size=1,p=[0.5,0.5])))
+                    complex_labels.append(int(np.random.choice([0,1],p=[0.5,0.5])))
                 else:
-                    complex_labels.append(int(np.random.choice([0,1],size=1,p=[0.5,0.5])))
+                    complex_labels.append(int(np.random.choice([0,1],p=[0.5,0.5])))
             complex_labels = np.array(complex_labels)
             pK_flags = np.zeros(len(protein_pockets))
             for i,pocket in enumerate(protein_pockets):
@@ -316,7 +322,7 @@ def tensorize_protein_pocket(protein_pockets):
         total_residues += residue_count
     fresidues = torch.from_numpy(np.reshape(np.array(fresidues,dtype=np.float32),[-1,20]))
     res_map = torch.from_numpy(res_map)
-    alpha_coordinates = torch.from_numpy(np.reshape(np.array(alpha_coordinates,dtype=np.float32),[-1,3])) 
+    alpha_coordinates = torch.from_numpy(np.concatenate(alpha_coordinates, axis=0).astype(np.float32).reshape(-1, 3))
     #distance_matrix = torch.from_numpy(distance_matrix)
     return (fresidues,res_map,res_scope,alpha_coordinates)
 
