@@ -1,56 +1,168 @@
-# **PLANET**
+# PLANET
 
-### PLANET: _**P**rotein-**L**igand **A**ffinity prediction **NET**work_
+**P**rotein-**L**igand **A**ffinity prediction **NET**work — a graph neural network that predicts binding affinity from a protein pocket graph and a 2D ligand graph, without requiring exhaustive docking conformational sampling.
 
-Predicting protein-ligand binding affinity is still a central issue in drug design. No wonder various deep learning models have been developed in recent years to tackle this issue in one aspect or another. So far most of them merely focus on reproducing the binding affinity of known binders (i.e. so-called “scoring power”).<br>
-Here, we have developed a graph neural network model called PLANET (Protein-Ligand Affinity prediction NETwork). This model takes the graph-represented 3D structure of the binding pocket on the target protein and the 2D structural graph of the ligand molecule as inputs. PLANET was trained through a multi-objective process with three related tasks, i.e. deriving protein-ligand binding affinity, protein-ligand contact map, and intra-ligand distance matrix. <br>
-As tested on the CASF-2016 benchmark, PLANET exhibited a comparable level of scoring power as some other machine learning models that rely on 3D protein-ligand complex structures as inputs. Besides, it exhibited notably better performance in virtual screening trials on the DUD-E and LIT-PCBA benchmarks. Compared to the popular conventional docking program GLIDE, PLANET took less than one percent of computation time to finish the same virtual screening job without a significant loss in accuracy because it did not need to perform exhaustive conformational sampling. In summary, PLANET achieved a decent performance in virtual screening as well as predicting protein-ligand binding affinity. This feature makes PLANET an attractive tool for drug discovery in the real world.
+PLANET was trained on PDBbind v2019 with three simultaneous objectives: binding affinity regression, protein-ligand contact map prediction, and intra-ligand distance matrix prediction. On the CASF-2016 benchmark it matches state-of-the-art 3D complex-based models while running at a fraction of the compute cost — making it practical for large-scale virtual screening.
 
-### Usage
-1. Setup dependencies (requires [uv](https://docs.astral.sh/uv/))
+Original paper: [PLANET: A Multi-Objective Graph Neural Network Model for Protein–Ligand Binding Affinity Prediction](https://doi.org/10.1021/acs.jcim.2c01085)
+
+---
+
+## Installation
+
+Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+
 ```bash
 uv sync
 ```
-This installs PyTorch with CUDA 12.1 support by default. For CPU-only or a different CUDA version edit the index URL in `pyproject.toml` before running `uv sync`:
-- CPU: `https://download.pytorch.org/whl/cpu`
-- CUDA 12.4: `https://download.pytorch.org/whl/cu124`
 
-2. Using PLANET <br>
-We have created a demo folder which includes a protein file (adrb2.pdb), a crystal ligand file (adrb2_ligand.sdf) as well as molecules (mols.sdf) to be estimated. These files are  originally derived from DUD-E dataset and prepared as below: <br>
-(1) The protein structure file (.pdb) are prepared using *prepwizard* in Maestro, including fixing broken residues and assign protonated states. Other structure preparation tools can also be applied. _NOTE:_ The most important is that $\alpha$-carbon of each reasidues must be correctly fixed in the .pdb file.
-(2) The molecule files (mols.sdf) are prepared using *epik* in Maestro, including adding hydrogen atoms and ionized states. the adrb2_ligand.sdf file is only used for determining binding pocket (only need to be in .sdf format).
+By default this pulls PyTorch with **CUDA 12.1** support. Edit the index URL in `pyproject.toml` before running `uv sync` to change this:
+
+| Target | URL |
+|--------|-----|
+| CPU only | `https://download.pytorch.org/whl/cpu` |
+| CUDA 12.4 | `https://download.pytorch.org/whl/cu124` |
+
+---
+
+## Quick start — virtual screening
+
+A demo is included (`demo/`): an ADRB2 receptor (`adrb2.pdb`), its crystal ligand (`adrb2_ligand.sdf`) used to define the binding pocket, and a set of molecules to score (`mols.sdf`).
+
 ```bash
 cd demo
 uv run ../PLANET_run.py -p adrb2.pdb -l adrb2_ligand.sdf -m mols.sdf
 ```
-3. Parameters
-   - _-p or --protein_, protein structure file;
-   - _-l or --ligand_, crystal ligand file for determining binding pocket, if specified, override the coordinate provided.
-   - _-x or --center_x ; -y or --center_y ; -z or --center_z , coordinates to define the center of binding pocket, same as follows
-   - _-m or --mol_file_, molecules to be esitmated in .sdf format
-   - _--prefix_, if not specified, the default is "result", that is the outcome will be saved as "result.csv" and "result.sdf"
-4. Output files <br>
-We provide two output formats including .csv and .sdf
 
-### Training PLANET on PDBbind
-Training data (PDBbind general set v.2020) can be accessed at http://pdbbind.org.cn/. <br>
-Suppose `$DATASET` is the absolute path to your PDBbind dataset directory, `$PK_JSON` is the path to your `PDBbind2020.json` file with pK values, and `$PLANET` is the repo root.
+Outputs `result.csv` and `result.sdf` with predicted affinities (pK units).
 
-**Step 1 – preprocess structures (runs in parallel with `$NJOBS` workers):**
+### Inference arguments
+
+| Flag | Description |
+|------|-------------|
+| `-p / --protein` | Protein structure file (`.pdb`) |
+| `-l / --ligand` | Crystal ligand SDF — defines pocket centre; overrides `-x/-y/-z` |
+| `-x/-y/-z` | Pocket centre coordinates (alternative to `-l`) |
+| `-m / --mol_file` | Molecules to score (`.sdf` or `.smi`) |
+| `--prefix` | Output file prefix (default: `result`) |
+
+### Preparing input files
+
+- **Protein:** fix broken residues and assign protonation states (e.g. Maestro `prepwizard`). **α-carbon of every residue must be present** — PLANET uses Cα positions for the protein graph.
+- **Ligands:** add hydrogens and assign ionisation states (e.g. Maestro `epik`, or RDKit).
+
+---
+
+## Training on PDBbind
+
+### Prerequisites
+
+- PDBbind general set (v2019 recommended) — available at <http://pdbbind.org.cn/>
+- CASF-2016 core set (used as held-out test set throughout training)
+- A JSON file mapping PDB codes to pK values — generate with:
+
 ```bash
-uv run $PLANET/process_PDBBind.py -d $DATASET -n $NJOBS -k $PK_JSON
+uv run scripts/make_pk_json.py --index $PDBBIND/index/INDEX_general_PL_data.2019 \
+    --out pk_v2019.json
 ```
 
-**Step 2 – build train/valid/core pickle files:**
+### Step 1 — preprocess structures
+
+Converts each PDBbind entry into a self-contained HDF5 pocket file (`<pdb>_pocket.h5`).
+Run in parallel with `-n` workers:
+
 ```bash
-uv run $PLANET/PLANET_datautils.py -p $DATASET -d $PLANET/data/
+uv run process_PDBBind.py \
+    -d $PDBBIND_DIR \
+    -n 16 \
+    -k pk_v2019.json
 ```
 
-**Step 3 – train:**
+Do the same for the CASF-2016 core set directory:
+
 ```bash
-uv run $PLANET/PLANET_train.py \
-    -t $PLANET/data/train.pkl \
-    -v $PLANET/data/valid.pkl \
-    -te $PLANET/data/core.pkl \
-    -d .
+uv run process_PDBBind.py \
+    -d $CASF_DIR \
+    -n 8 \
+    -k pk_v2019.json
+```
+
+Each entry directory should contain `<pdb>_ligand.sdf`, `<pdb>_protein.pdb`, and optionally `<pdb>_decoy.sdf`.  
+After preprocessing, each directory will also contain `<pdb>_pocket.h5`.
+
+> **Note:** The HDF5 format (via `h5py`) replaced the previous pickle-based format. Existing `_pocket.pkl` files are no longer compatible — rerun `process_PDBBind.py` to regenerate.
+
+### Step 2 — train
+
+The dataset is built on-the-fly from the directory structure — no intermediate index files needed.
+CASF entries are automatically excluded from train/valid and used as the running test set.
+
+```bash
+uv run PLANET_train.py \
+    -d $PDBBIND_DIR \
+    -c $CASF_DIR \
+    -k pk_v2019.json \
+    -s checkpoints/
+```
+
+Key training arguments:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--epoch` | 250 | Number of epochs |
+| `--batch_size` | 16 | Complexes per batch |
+| `--lr` | 1e-4 | Learning rate |
+| `--anneal_iter` | 20000 | LR decay interval (after step 60k) |
+| `--save_iter` | 5000 | Checkpoint + eval interval (steps) |
+| `--print_iter` | 200 | Log interval (steps) |
+| `--initial_step` | 0 | Resume from step (pair with `--load_epoch`) |
+
+### Step 3 — evaluate on CASF-2016
+
+```bash
+uv run PLANET_test.py \
+    -f checkpoints/PLANET.iter-XXXXX \
+    -c $CASF_DIR \
+    -k pk_v2019.json \
+    -o results/casf
+```
+
+Prints MAE, RMSE, Pearson R, Spearman ρ, and Concordance Index (CI).  
+Saves predictions to `results/casf.h5` (arrays) and `results/casf_meta.json` (scopes + bonded pairs).
+
+---
+
+## Data format
+
+Each preprocessed complex is stored as `<pdb>_pocket.h5` (gzip-compressed HDF5):
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `res_features` | `[n_res, 20]` | BLOSUM62 residue features |
+| `alpha_coordinates` | `[n_res, 3]` | Cα positions |
+| `pro_lig_interaction` | `[n_atoms, n_res]` | Contact labels (4 Å threshold) |
+| `ligand_mol` | `[N]` uint8 | RDKit molecule binary |
+| `decoys/0..k` | `[M]` uint8 | Decoy molecule binaries |
+| attrs: `pK` | float | Binding affinity |
+| attrs: `decoys_count` | int | Number of decoys |
+
+---
+
+## Repository layout
+
+```
+PLANET_run.py          — virtual screening inference
+PLANET_train.py        — training loop
+PLANET_test.py         — CASF-2016 evaluation
+PLANET_model.py        — model definition (PLANET nn.Module)
+PLANET_datautils.py    — ProLigDataset (on-the-fly HDF5 loader)
+chemutils.py           — featurisation, ComplexPocket, HDF5 I/O
+layers.py              — ProteinEGNN, LigandGAT, ProLig layers
+nnutils.py             — tensor utilities
+process_PDBBind.py     — preprocessing (pkl → h5 per complex)
+scripts/
+  make_pk_json.py      — build pk_v2019.json from PDBbind index
+  build_datasets_v2019.py — (legacy) static dataset builder, superseded
+demo/                  — example protein + ligands for quick test
+PLANET.param           — pretrained weights
 ```

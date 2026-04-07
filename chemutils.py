@@ -206,13 +206,14 @@ class ComplexPocket():
         with h5py.File(path, 'w') as f:
             f.attrs['pK'] = self.pK
             f.attrs['decoys_count'] = self.decoys_count
-            f.create_dataset('res_features', data=self.res_features.astype(np.float32))
-            f.create_dataset('alpha_coordinates', data=alpha_coords)
-            f.create_dataset('pro_lig_interaction', data=self.pro_lig_interaction.astype(np.float32))
-            f.create_dataset('ligand_mol', data=np.frombuffer(self.ligand.mol.ToBinary(), dtype=np.uint8))
+            ckw = dict(compression='gzip', compression_opts=4)
+            f.create_dataset('res_features', data=self.res_features.astype(np.float32), **ckw)
+            f.create_dataset('alpha_coordinates', data=alpha_coords, **ckw)
+            f.create_dataset('pro_lig_interaction', data=self.pro_lig_interaction.astype(np.float32), **ckw)
+            f.create_dataset('ligand_mol', data=np.frombuffer(self.ligand.mol.ToBinary(), dtype=np.uint8), **ckw)
             decoys = f.create_group('decoys')
             for i, decoy in enumerate(self.decoys):
-                decoys.create_dataset(str(i), data=np.frombuffer(decoy.mol.ToBinary(), dtype=np.uint8))
+                decoys.create_dataset(str(i), data=np.frombuffer(decoy.mol.ToBinary(), dtype=np.uint8), **ckw)
 
     @classmethod
     def load_h5(cls, path: str) -> 'ComplexPocket':
