@@ -1,3 +1,13 @@
+"""
+PLANET training script.
+
+Basic usage:
+    uv run train.py -d /data/pdbbind -c /data/casf2016 -k pk_v2019.json -s checkpoints/
+
+Resume from checkpoint:
+    uv run train.py -d /data/pdbbind -c /data/casf2016 -k pk_v2019.json -s checkpoints/ \\
+        --checkpoint checkpoints/PLANET.iter-50000 --initial_step 50000
+"""
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,156 +15,180 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from planet.data import ProLigDataset
 from planet.model import PLANET
-import argparse,os,sys
+import argparse, os, sys
 import numpy as np
 from rdkit import RDLogger
 
+
 if __name__ == '__main__':
     RDLogger.DisableLog('rdApp.*')
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d','--data_dir', required=True,
-                        help='PDBbind directory with <pdb>/<pdb>_pocket.h5 structure')
-    parser.add_argument('-c','--casf_dir', required=True,
-                        help='CASF-2016/coreset directory (excluded from train/valid, used as test)')
-    parser.add_argument('-k','--pk_json', required=True,
-                        help='Path to pk_v2019.json')
-    parser.add_argument('-s','--save_dir', required=True)
+    parser = argparse.ArgumentParser(
+        description='Train PLANET on PDBbind',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
-    parser.add_argument('--feature_dims', type=int, default=300)
-    parser.add_argument('-n','--nheads', type=int, default=8)
-    parser.add_argument('--key_dims', type=int, default=300)
-    parser.add_argument('-va','--value_dims', type=int, default=300)
+    # ── data ──────────────────────────────────────────────────────────────────
+    data = parser.add_argument_group('data')
+    data.add_argument('-d', '--data_dir', required=True,
+                      help='PDBbind directory — expects <pdb>/<pdb>_pocket.h5 per entry')
+    data.add_argument('-c', '--casf_dir', required=True,
+                      help='CASF-2016 coreset directory (held out as test set)')
+    data.add_argument('-k', '--pk_json', required=True,
+                      help='JSON file mapping PDB codes to pK values (e.g. pk_v2019.json)')
+    data.add_argument('--valid_frac', type=float, default=0.1,
+                      help='Fraction of PDBbind entries used for validation')
 
-    parser.add_argument('-pu','--pro_update_inters', type=int, default=3)
-    parser.add_argument('-lu','--lig_update_iters',type=int,default=10)
-    parser.add_argument('-pl','--pro_lig_update_iters',type=int,default=1)
+    # ── model ─────────────────────────────────────────────────────────────────
+    model_args = parser.add_argument_group('model architecture')
+    model_args.add_argument('--feature_dims', type=int, default=300,
+                            help='Hidden feature dimensionality')
+    model_args.add_argument('-n', '--nheads', type=int, default=8,
+                            help='Number of attention heads')
+    model_args.add_argument('--key_dims', type=int, default=300,
+                            help='Attention key dimensionality')
+    model_args.add_argument('-va', '--value_dims', type=int, default=300,
+                            help='Attention value dimensionality')
+    model_args.add_argument('-pu', '--pro_update_inters', type=int, default=3,
+                            help='Protein EGNN update iterations')
+    model_args.add_argument('-lu', '--lig_update_iters', type=int, default=10,
+                            help='Ligand GAT update iterations')
+    model_args.add_argument('-pl', '--pro_lig_update_iters', type=int, default=1,
+                            help='Protein-ligand cross-attention iterations')
 
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--clip_norm', type=float, default=200.0)
+    # ── training ──────────────────────────────────────────────────────────────
+    train_args = parser.add_argument_group('training')
+    train_args.add_argument('--epoch', type=int, default=250,
+                            help='Number of training epochs')
+    train_args.add_argument('--batch_size', type=int, default=16,
+                            help='Complexes per batch')
+    train_args.add_argument('--lr', type=float, default=1e-4,
+                            help='Initial learning rate')
+    train_args.add_argument('--clip_norm', type=float, default=200.0,
+                            help='Gradient clipping norm')
+    train_args.add_argument('--anneal_iter', type=int, default=20000,
+                            help='LR decay interval in steps (applied after step 60k)')
 
-    parser.add_argument('--epoch', type=int, default=250)
-    parser.add_argument('--batch_size',type=int,default=16)
-    parser.add_argument('--anneal_iter', type=int, default=20000)
-
-    parser.add_argument('--load_epoch',type=int,default=0)
-    parser.add_argument('--initial_step',type=int,default=0)
-
-    parser.add_argument('--save_iter', type=int, default=5000)
-    parser.add_argument('--print_iter', type=int, default=200)
+    # ── checkpointing & logging ───────────────────────────────────────────────
+    ckpt = parser.add_argument_group('checkpointing and logging')
+    ckpt.add_argument('-s', '--save_dir', required=True,
+                      help='Directory to save checkpoints')
+    ckpt.add_argument('--checkpoint', default=None,
+                      help='Path to checkpoint file to resume from')
+    ckpt.add_argument('--initial_step', type=int, default=0,
+                      help='Global step to start from (set when resuming)')
+    ckpt.add_argument('--save_iter', type=int, default=5000,
+                      help='Save checkpoint and run eval every N steps')
+    ckpt.add_argument('--print_iter', type=int, default=200,
+                      help='Print training metrics every N steps')
 
     args = parser.parse_args()
     print(args)
+    os.makedirs(args.save_dir, exist_ok=True)
 
+    # ── datasets ──────────────────────────────────────────────────────────────
     casf_ids = {d for d in os.listdir(args.casf_dir)}
 
-    valid_dataset = ProLigDataset(args.data_dir, args.pk_json, split='valid',
-                                  exclude_ids=casf_ids, batch_size=args.batch_size,
-                                  shuffle=False, decoy_flag=False)
-    valid_loader = DataLoader(valid_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
+    valid_dataset = ProLigDataset(
+        args.data_dir, args.pk_json, split='valid',
+        exclude_ids=casf_ids, valid_frac=args.valid_frac,
+        batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False,
+                              num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 
-    test_dataset = ProLigDataset(args.casf_dir, args.pk_json, split='all',
-                                 batch_size=args.batch_size, shuffle=False, decoy_flag=False)
-    test_loader = DataLoader(test_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
+    test_dataset = ProLigDataset(
+        args.casf_dir, args.pk_json, split='all',
+        batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False,
+                             num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 
-    feature_dims = args.feature_dims
-    nheads = args.nheads
-    key_dims = args.key_dims
-    value_dims = args.value_dims
-    pro_update_inters = args.pro_update_inters
-    lig_update_iters = args.lig_update_iters
-    pro_lig_update_iters = args.pro_lig_update_iters
+    # ── model ─────────────────────────────────────────────────────────────────
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = PLANET(feature_dims,nheads,key_dims,value_dims,pro_update_inters,lig_update_iters,pro_lig_update_iters,device).to(device)
+    model = PLANET(
+        args.feature_dims, args.nheads, args.key_dims, args.value_dims,
+        args.pro_update_inters, args.lig_update_iters, args.pro_lig_update_iters,
+        device).to(device)
 
-    for param in model.parameters():
-        if param.dim() == 1:
-            nn.init.constant_(param, 0)
-        else:
-            nn.init.xavier_uniform_(param)
+    if args.checkpoint:
+        print(f"Resuming from checkpoint: {args.checkpoint}")
+        model.load_state_dict(torch.load(args.checkpoint, map_location=device, weights_only=True))
+    else:
+        for param in model.parameters():
+            if param.dim() == 1:
+                nn.init.constant_(param, 0)
+            else:
+                nn.init.xavier_uniform_(param)
 
-    print("Model #Params: {:d}K".format(sum([x.nelement() for x in model.parameters()]) // 1000))
+    print("Model #Params: {:d}K".format(sum(x.nelement() for x in model.parameters()) // 1000))
     print(model)
+
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
-    scheduler = lr_scheduler.ExponentialLR(optimizer,0.8)
+    scheduler = lr_scheduler.ExponentialLR(optimizer, 0.8)
     total_step = args.initial_step
     meters = np.zeros(6)
-    beta = 0
+    beta = 0.0 if total_step <= 500 else 1.0
 
+    # ── training loop ─────────────────────────────────────────────────────────
     model.train()
-    for epoch in range(1,1+args.epoch):
-        train_dataset = ProLigDataset(args.data_dir, args.pk_json, split='train',
-                                      exclude_ids=casf_ids, batch_size=args.batch_size,
-                                      shuffle=True, decoy_flag=True)
-        train_loader = DataLoader(train_dataset,batch_size=1,shuffle=False,num_workers=4,drop_last=False,collate_fn=lambda x:x[0])
+    for epoch in range(1, 1 + args.epoch):
+        train_dataset = ProLigDataset(
+            args.data_dir, args.pk_json, split='train',
+            exclude_ids=casf_ids, valid_frac=args.valid_frac,
+            batch_size=args.batch_size, shuffle=True, decoy_flag=True)
+        train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False,
+                                  num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 
-        for (res_feature_batch,mol_feature_batch,targets) in train_loader:
+        for (res_feature_batch, mol_feature_batch, targets) in train_loader:
             optimizer.zero_grad()
-            predictions = model(res_feature_batch,mol_feature_batch)
-            lig_interaction_loss,pro_lig_interaction_loss,affinity_loss = model.compute_loss(predictions,targets,res_feature_batch,mol_feature_batch)
-            total_loss = lig_interaction_loss + pro_lig_interaction_loss + beta * affinity_loss
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(filter(lambda p: p.requires_grad, model.parameters()), args.clip_norm)
+            predictions = model(res_feature_batch, mol_feature_batch)
+            lig_loss, prolig_loss, aff_loss = model.compute_loss(
+                predictions, targets, res_feature_batch, mol_feature_batch)
+            (lig_loss + prolig_loss + beta * aff_loss).backward()
+            nn.utils.clip_grad_norm_(
+                filter(lambda p: p.requires_grad, model.parameters()), args.clip_norm)
             optimizer.step()
 
-            lig_interaction_acc,pro_lig_interaction_acc,affinity_mae = model.compute_metrics(predictions,targets)
-
-            meters = meters + np.array([lig_interaction_loss.item(),lig_interaction_acc.item(),pro_lig_interaction_loss.item(),\
-                pro_lig_interaction_acc.item(),affinity_loss.item(),affinity_mae.item()])
+            lig_acc, prolig_acc, aff_mae = model.compute_metrics(predictions, targets)
+            meters += np.array([lig_loss.item(), lig_acc.item(), prolig_loss.item(),
+                                 prolig_acc.item(), aff_loss.item(), aff_mae.item()])
             total_step += 1
-
-            if total_step <= 500:
-                beta = 0.0
-            else:
-                beta = 1.0
+            beta = 0.0 if total_step <= 500 else 1.0
 
             if total_step % args.print_iter == 0:
                 meters /= args.print_iter
-                print("[{}]\tLig_L:{:.3f}\tLig_ACC:{:.3f}\tProLig_L:{:.3f}\tProLig_ACC:{:.3f}\tAffinity_L:{:.3f}\tMAE:{:.3f}" \
-                    .format(total_step,meters[0],meters[1],meters[2],meters[3],meters[4],meters[5]))
+                print("[{}]\tLig_L:{:.3f}\tLig_ACC:{:.3f}\tProLig_L:{:.3f}"
+                      "\tProLig_ACC:{:.3f}\tAffinity_L:{:.3f}\tMAE:{:.3f}".format(
+                          total_step, *meters))
                 sys.stdout.flush()
-                meters *= 0.
+                meters[:] = 0.
 
             if total_step > 60000 and total_step % args.anneal_iter == 0:
                 scheduler.step()
                 print("[learning rate]: {:.6f}".format(scheduler.get_last_lr()[0]))
 
             if total_step > 0 and total_step % args.save_iter == 0:
+                ckpt_path = os.path.join(args.save_dir, f"PLANET.iter-{total_step}")
+                torch.save(model.state_dict(), ckpt_path)
+                print(f"Saved checkpoint: {ckpt_path}")
+
                 model.eval()
                 with torch.no_grad():
-                    valid_meters = np.zeros(6)
-                    valid_batch_count = 0
-                    for (res_batch,mol_batch,targets) in valid_loader:
-                        try:
-                            predictions = model(res_batch,mol_batch)
-                            lig_interaction_loss,pro_lig_interaction_loss,affinity_loss = model.compute_loss(predictions,targets,res_batch,mol_batch)
-                            lig_interaction_acc,pro_lig_interaction_acc,affinity_mae = model.compute_metrics(predictions,targets)
-                            valid_batch_count += 1
-                            valid_meters = valid_meters + np.array([lig_interaction_loss.item(),lig_interaction_acc.item(),pro_lig_interaction_loss.item(),\
-                                pro_lig_interaction_acc.item(),affinity_loss.item(),affinity_mae.item()])
-                        except Exception as e:
-                            print(f"[Valid] skipping batch: {e}")
-                            continue
-                    valid_meters /= valid_batch_count
-                    print("[Valid_{}]\tLig_L:{:.3f}\tLig_ACC:{:.3f}\tProLig_L:{:.3f}\tProLig_ACC:{:.3f}\tAffinity_L:{:.3f}\tMAE:{:.3f}" \
-                        .format(total_step,valid_meters[0],valid_meters[1],valid_meters[2],valid_meters[3],valid_meters[4],valid_meters[5]))
-
-                torch.save(model.state_dict(), os.path.join(args.save_dir, f"PLANET.iter-{total_step}"))
-
-                with torch.no_grad():
-                    test_meters = np.zeros(6)
-                    test_batch_count = 0
-                    for (res_batch,mol_batch,targets) in test_loader:
-                        try:
-                            predictions = model(res_batch,mol_batch)
-                            lig_interaction_loss,pro_lig_interaction_loss,affinity_loss = model.compute_loss(predictions,targets,res_batch,mol_batch)
-                            lig_interaction_acc,pro_lig_interaction_acc,affinity_mae = model.compute_metrics(predictions,targets)
-                            test_batch_count += 1
-                            test_meters = test_meters + np.array([lig_interaction_loss.item(),lig_interaction_acc.item(),pro_lig_interaction_loss.item(),\
-                                pro_lig_interaction_acc.item(),affinity_loss.item(),affinity_mae.item()])
-                        except Exception as e:
-                            print(f"[Test] skipping batch: {e}")
-                            continue
-                    test_meters /= test_batch_count
-                    print("[Test_{}]\tLig_L:{:.3f}\tLig_ACC:{:.3f}\tProLig_L:{:.3f}\tProLig_ACC:{:.3f}\tAffinity_L:{:.3f}\tMAE:{:.3f}" \
-                        .format(total_step,test_meters[0],test_meters[1],test_meters[2],test_meters[3],test_meters[4],test_meters[5]))
+                    for tag, loader in [('Valid', valid_loader), ('Test', test_loader)]:
+                        eval_meters = np.zeros(6)
+                        count = 0
+                        for (res_batch, mol_batch, targets) in loader:
+                            try:
+                                preds = model(res_batch, mol_batch)
+                                ll, pll, al = model.compute_loss(preds, targets, res_batch, mol_batch)
+                                la, pla, mae = model.compute_metrics(preds, targets)
+                                eval_meters += np.array([ll.item(), la.item(), pll.item(),
+                                                         pla.item(), al.item(), mae.item()])
+                                count += 1
+                            except Exception as e:
+                                print(f"[{tag}] skipping batch: {e}")
+                                continue
+                        if count > 0:
+                            eval_meters /= count
+                            print("[{}_{}]\tLig_L:{:.3f}\tLig_ACC:{:.3f}\tProLig_L:{:.3f}"
+                                  "\tProLig_ACC:{:.3f}\tAffinity_L:{:.3f}\tMAE:{:.3f}".format(
+                                      tag, total_step, *eval_meters))
                 model.train()
