@@ -3,7 +3,9 @@ name = "planet"
 version = "0.1.0"
 description = "Protein-Ligand Affinity prediction NETwork"
 requires-python = ">=3.11"
-packages = ["planet"]
+
+[tool.uv]
+package = true
 
 [project.scripts]
 planet-screen = "planet.screening:main_cli"

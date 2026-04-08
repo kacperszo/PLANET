@@ -10,9 +10,6 @@ build/
 venv/
 env/
 
-# uv lockfile (reproducibility handled by pyproject.toml constraints)
-uv.lock
-
 # Data directories (preprocessed HDF5 files, raw PDBbind)
 data/
 
