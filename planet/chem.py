@@ -77,9 +77,21 @@ def near_pocket(pdb_line,centeroid):
     else:
         return True
 
+def _element_from_pdb_line(line):
+    """Return element symbol from a PDB ATOM line.
+    Prefers the official element column (77-78); falls back to the
+    first non-numeric character of the atom name (13-16) for older
+    files (e.g. SYBYL-generated PDB) that omit the element column."""
+    el = line[76:78].strip().capitalize()
+    if el:
+        return el
+    # infer from atom name: strip digits and spaces, take first letter
+    name = line[12:16].strip().lstrip('0123456789')
+    return name[0].capitalize() if name else ''
+
 def mass_center_from_pdb(pdb_lines):
-    pdb_lines = [line for line in pdb_lines if line[76:78].strip().capitalize() in PROTEIN_ELEMENTS]
-    atoms_mass = np.reshape(np.array([periodic_table.GetAtomicWeight(line[76:78].strip().capitalize()) for line in pdb_lines]),[-1,1])
+    pdb_lines = [line for line in pdb_lines if _element_from_pdb_line(line) in PROTEIN_ELEMENTS]
+    atoms_mass = np.reshape(np.array([periodic_table.GetAtomicWeight(_element_from_pdb_line(line)) for line in pdb_lines]),[-1,1])
     coordinates = np.array([
         [float(line[30:38]),float(line[38:46]),float(line[46:54])] 
         for line in pdb_lines],dtype=np.float32)
