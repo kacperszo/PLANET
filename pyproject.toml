@@ -3,13 +3,6 @@ name = "planet"
 version = "0.1.0"
 description = "Protein-Ligand Affinity prediction NETwork"
 requires-python = ">=3.11"
-
-[tool.uv]
-package = true
-
-[project.scripts]
-planet-screen = "planet.screening:main_cli"
-
 dependencies = [
     "torch>=2.2",
     "numpy>=1.24",
@@ -21,6 +14,12 @@ dependencies = [
     "h5py>=3.8",
     "tqdm>=4.64",
 ]
+
+[project.scripts]
+planet-screen = "planet.screening:main_cli"
+
+[tool.uv]
+package = true
 
 # By default PyTorch is installed from the PyTorch CUDA 12.1 index.
 # For CPU-only: run `uv sync` after changing the index URL to
