@@ -28,15 +28,18 @@ def parse_index(index_path):
 
 
 def process_one(args):
-    record_dir, pk_data = args
+    record_dir, pk_data, skip_existing = args
     pdb_name = os.path.basename(record_dir)
+    h5_path  = os.path.join(record_dir, f'{pdb_name}_pocket.h5')
+    if skip_existing and os.path.exists(h5_path):
+        return
     ligand_sdf  = os.path.join(record_dir, f'{pdb_name}_ligand.sdf')
     protein_pdb = os.path.join(record_dir, f'{pdb_name}_protein.pdb')
     decoy_sdf   = os.path.join(record_dir, f'{pdb_name}_decoy.sdf')
     pK = pk_data.get(pdb_name.lower(), 0)
     try:
         pocket = ComplexPocket(protein_pdb, ligand_sdf, pK, decoy_sdf)
-        pocket.save_h5(os.path.join(record_dir, f'{pdb_name}_pocket.h5'))
+        pocket.save_h5(h5_path)
     except Exception as e:
         print(f"Skipping {pdb_name}: {e}")
 
@@ -52,13 +55,15 @@ if __name__ == '__main__':
                         help='PDBbind INDEX file (e.g. INDEX_general_PL_data.2019)')
     parser.add_argument('-n', '--njobs', required=True, type=int,
                         help='Number of parallel workers')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Skip entries that already have a _pocket.h5 file')
     args = parser.parse_args()
     print(args)
 
     pk_data = parse_index(args.index)
     print(f"Parsed {len(pk_data)} pK entries from index.")
 
-    records = [(os.path.join(args.dir, sub), pk_data)
+    records = [(os.path.join(args.dir, sub), pk_data, args.skip_existing)
                for sub in os.listdir(args.dir)
                if os.path.isdir(os.path.join(args.dir, sub))]
     with Pool(args.njobs) as pool:
