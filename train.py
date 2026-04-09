@@ -101,7 +101,10 @@ if __name__ == '__main__':
                 ids.add(line.split()[0].lower())
         return ids
 
-    explicit_split = args.train_index and args.valid_index and args.test_index
+    given = sum(x is not None for x in [args.train_index, args.valid_index, args.test_index])
+    if 0 < given < 3:
+        parser.error("Provide all three index flags (--train_index, --valid_index, --test_index) or none.")
+    explicit_split = given == 3
     if explicit_split:
         train_ids = parse_index_ids(args.train_index)
         valid_ids = parse_index_ids(args.valid_index)

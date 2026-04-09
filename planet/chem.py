@@ -154,6 +154,8 @@ class ComplexPocket():
             mol2_path = ligand_sdf.replace('_ligand.sdf', '_ligand.mol2')
             if os.path.exists(mol2_path):
                 ligand = Chem.MolFromMol2File(mol2_path, removeHs=False)
+        if ligand is None:
+            raise ValueError(f"Could not parse ligand from {ligand_sdf} or mol2 fallback")
         self.ligand = Mol(ligand)
         
         self.pK = pK
