@@ -105,13 +105,16 @@ if __name__ == '__main__':
     if 0 < given < 3:
         parser.error("Provide all three index flags (--train_index, --valid_index, --test_index) or none.")
     explicit_split = given == 3
+
+    casf_ids = {d.lower() for d in os.listdir(args.casf_dir)}
+
     if explicit_split:
-        train_ids = parse_index_ids(args.train_index)
-        valid_ids = parse_index_ids(args.valid_index)
+        train_ids = parse_index_ids(args.train_index) - casf_ids
+        valid_ids = parse_index_ids(args.valid_index) - casf_ids
         test_ids  = parse_index_ids(args.test_index)
-        print(f"Explicit split: {len(train_ids)} train / {len(valid_ids)} valid / {len(test_ids)} test")
+        print(f"Explicit split: {len(train_ids)} train / {len(valid_ids)} valid / {len(test_ids)} test "
+              f"(excluded {len(casf_ids)} CASF entries from train/valid)")
     else:
-        casf_ids = {d.lower() for d in os.listdir(args.casf_dir)}
         print(f"Random split: valid_frac={args.valid_frac}, excluding {len(casf_ids)} CASF entries")
 
     # ── datasets ──────────────────────────────────────────────────────────────
