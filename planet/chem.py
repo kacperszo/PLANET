@@ -149,7 +149,11 @@ class ComplexPocket():
     def __init__(self,protein_pdb,ligand_sdf,pK=0,decoy_sdf=None):
         with open(protein_pdb,'r') as pdb_file:
             pdb_content = [line.strip() for line in pdb_file if line.startswith('ATOM')]
-        ligand = Chem.SDMolSupplier(ligand_sdf,removeHs=False)[0]
+        ligand = Chem.SDMolSupplier(ligand_sdf, removeHs=False)[0]
+        if ligand is None:
+            mol2_path = ligand_sdf.replace('_ligand.sdf', '_ligand.mol2')
+            if os.path.exists(mol2_path):
+                ligand = Chem.MolFromMol2File(mol2_path, removeHs=False)
         self.ligand = Mol(ligand)
         
         self.pK = pK

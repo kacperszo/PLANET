@@ -32,9 +32,15 @@ if __name__ == '__main__':
     data.add_argument('-d', '--data_dir', required=True,
                       help='PDBbind directory — expects <pdb>/<pdb>_pocket.h5 per entry')
     data.add_argument('-c', '--casf_dir', required=True,
-                      help='CASF-2016 coreset directory (held out as test set)')
+                      help='CASF test directory (held out as test set, or test index dir)')
+    data.add_argument('--train_index', default=None,
+                      help='PDBbind index file for training set (explicit split mode)')
+    data.add_argument('--valid_index', default=None,
+                      help='PDBbind index file for validation set (explicit split mode)')
+    data.add_argument('--test_index', default=None,
+                      help='PDBbind index file for test set (explicit split mode)')
     data.add_argument('--valid_frac', type=float, default=0.1,
-                      help='Fraction of PDBbind entries used for validation')
+                      help='Fraction of PDBbind entries used for validation (random split mode)')
 
     # ── model ─────────────────────────────────────────────────────────────────
     model_args = parser.add_argument_group('model architecture')
@@ -83,19 +89,47 @@ if __name__ == '__main__':
     print(args)
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # ── datasets ──────────────────────────────────────────────────────────────
-    casf_ids = {d for d in os.listdir(args.casf_dir)}
+    # ── split mode ────────────────────────────────────────────────────────────
+    def parse_index_ids(path):
+        """Return set of PDB codes from a PDBbind index file."""
+        ids = set()
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                ids.add(line.split()[0].lower())
+        return ids
 
-    valid_dataset = ProLigDataset(
-        args.data_dir, split='valid',
-        exclude_ids=casf_ids, valid_frac=args.valid_frac,
-        batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+    explicit_split = args.train_index and args.valid_index and args.test_index
+    if explicit_split:
+        train_ids = parse_index_ids(args.train_index)
+        valid_ids = parse_index_ids(args.valid_index)
+        test_ids  = parse_index_ids(args.test_index)
+        print(f"Explicit split: {len(train_ids)} train / {len(valid_ids)} valid / {len(test_ids)} test")
+    else:
+        casf_ids = {d.lower() for d in os.listdir(args.casf_dir)}
+        print(f"Random split: valid_frac={args.valid_frac}, excluding {len(casf_ids)} CASF entries")
+
+    # ── datasets ──────────────────────────────────────────────────────────────
+    if explicit_split:
+        valid_dataset = ProLigDataset(
+            args.data_dir, pdb_ids=valid_ids,
+            batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+        test_dataset = ProLigDataset(
+            args.data_dir, pdb_ids=test_ids,
+            batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+    else:
+        valid_dataset = ProLigDataset(
+            args.data_dir, split='valid',
+            exclude_ids=casf_ids, valid_frac=args.valid_frac,
+            batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+        test_dataset = ProLigDataset(
+            args.casf_dir, split='all',
+            batch_size=args.batch_size, shuffle=False, decoy_flag=False)
+
     valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False,
                               num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
-
-    test_dataset = ProLigDataset(
-        args.casf_dir, split='all',
-        batch_size=args.batch_size, shuffle=False, decoy_flag=False)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False,
                              num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 
@@ -128,10 +162,15 @@ if __name__ == '__main__':
     # ── training loop ─────────────────────────────────────────────────────────
     model.train()
     for epoch in range(1, 1 + args.epoch):
-        train_dataset = ProLigDataset(
-            args.data_dir, split='train',
-            exclude_ids=casf_ids, valid_frac=args.valid_frac,
-            batch_size=args.batch_size, shuffle=True, decoy_flag=True)
+        if explicit_split:
+            train_dataset = ProLigDataset(
+                args.data_dir, pdb_ids=train_ids,
+                batch_size=args.batch_size, shuffle=True, decoy_flag=True)
+        else:
+            train_dataset = ProLigDataset(
+                args.data_dir, split='train',
+                exclude_ids=casf_ids, valid_frac=args.valid_frac,
+                batch_size=args.batch_size, shuffle=True, decoy_flag=True)
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False,
                                   num_workers=4, drop_last=False, collate_fn=lambda x: x[0])
 

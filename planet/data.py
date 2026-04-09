@@ -11,21 +11,28 @@ class ProLigDataset(Dataset):
     Dataset for PLANET training/evaluation.
 
     Scans data_dir for <pdb>/<pdb>_pocket.h5 files at runtime.
-    pK values are read directly from the stored HDF5 attributes —
-    no separate JSON file needed.
+    pK values are read directly from the stored HDF5 attributes.
+
+    Two split modes:
+    - Explicit: pass ``pdb_ids`` — only those PDB codes are used, no random split.
+      Used when pre-defined train/valid/test index files are available.
+    - Random: omit ``pdb_ids`` — directory is scanned, ``exclude_ids`` are dropped,
+      and the remainder is split randomly into train/valid by ``valid_frac``.
 
     Args:
         data_dir   : directory with <pdb>/<pdb>_pocket.h5 structure
-        split      : 'train' | 'valid' | 'all'
-        exclude_ids: PDB codes to skip (e.g. CASF test set)
-        valid_frac : fraction of data used for validation split
+        pdb_ids    : explicit set of PDB codes to use (overrides split/exclude/valid_frac)
+        split      : 'train' | 'valid' | 'all' — used only when pdb_ids is None
+        exclude_ids: PDB codes to skip — used only when pdb_ids is None
+        valid_frac : fraction of data for validation — used only when pdb_ids is None
         seed       : random seed for reproducible train/valid split
         batch_size : complexes per batch
-        shuffle    : shuffle records before batching (training only)
+        shuffle    : shuffle records before batching (set True for training)
         decoy_flag : use random decoy ligands during training
     """
 
     def __init__(self, data_dir: str,
+                 pdb_ids: Optional[Set[str]] = None,
                  split: str = 'all',
                  exclude_ids: Optional[Set[str]] = None,
                  valid_frac: float = 0.1,
@@ -34,27 +41,38 @@ class ProLigDataset(Dataset):
                  shuffle: bool = True,
                  decoy_flag: bool = True):
 
-        exclude_ids = {x.lower() for x in (exclude_ids or set())}
+        if pdb_ids is not None:
+            # explicit mode: use exactly the given PDB codes
+            pdb_ids = {x.lower() for x in pdb_ids}
+            records = []
+            for pdb in os.listdir(data_dir):
+                if pdb.lower() not in pdb_ids:
+                    continue
+                h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
+                if not os.path.exists(h5_path):
+                    continue
+                records.append(h5_path)
+        else:
+            # random split mode
+            exclude_ids = {x.lower() for x in (exclude_ids or set())}
+            records = []
+            for pdb in os.listdir(data_dir):
+                if pdb.lower() in exclude_ids:
+                    continue
+                h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
+                if not os.path.exists(h5_path):
+                    continue
+                records.append(h5_path)
 
-        records = []
-        for pdb in os.listdir(data_dir):
-            if pdb.lower() in exclude_ids:
-                continue
-            h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
-            if not os.path.exists(h5_path):
-                continue
-            records.append(h5_path)
+            rng = random.Random(seed)
+            rng.shuffle(records)
+            n_valid = int(len(records) * valid_frac)
+            if split == 'train':
+                records = records[n_valid:]
+            elif split == 'valid':
+                records = records[:n_valid]
 
-        # deterministic train/valid split
         rng = random.Random(seed)
-        rng.shuffle(records)
-        n_valid = int(len(records) * valid_frac)
-        if split == 'train':
-            records = records[n_valid:]
-        elif split == 'valid':
-            records = records[:n_valid]
-        # 'all' → keep everything
-
         if shuffle:
             max_attempts = 1000
             for attempt in range(max_attempts):

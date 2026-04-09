@@ -8,6 +8,46 @@ Original paper: [PLANET: A Multi-Objective Graph Neural Network Model for Protei
 
 ---
 
+## How it works
+
+PLANET takes as input a **protein pocket** (residue sequence + Cα coordinates only — no side chains, no docked pose) and a **2D ligand graph** (atoms + bonds), and predicts binding affinity in pK units.
+
+```
+Protein pocket                       Ligand (2D graph)
+  residues × BLOSUM62 (20-dim)         atoms × physicochemical features
+  + Cα coordinates                     + bond features
+        │                                     │
+   ProteinEGNN                           LigandGAT
+  (E(n)-equivariant                  (graph attention,
+   message passing,                   bond-message
+   3 iterations)                      passing, 10 iters)
+        │                                     │
+        └──────── ProteinLigandAttention ──────┘
+                  (bidirectional cross-attention
+                   between residues and atoms,
+                   1 iteration)
+                         │
+                       ProLig
+                  (element-wise product
+                   of protein × ligand features)
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+   intra-ligand    protein-ligand    binding
+   distance map    contact map       affinity (pK)
+```
+
+**ProteinEGNN** encodes the pocket using Cα–Cα squared distances as edge features, making it invariant to rotation and translation. **LigandGAT** encodes the ligand using a bond-centric message passing scheme. **ProteinLigandAttention** lets residue and atom representations update each other via cross-attention. The final **ProLig** head predicts all three outputs from element-wise products of the cross-attended features.
+
+The model is trained with three simultaneous objectives:
+1. **Affinity regression** — MSE loss on pK values (masked where pK = 0)
+2. **Protein-ligand contact prediction** — BCE loss on atom–residue contact labels (4 Å threshold)
+3. **Intra-ligand distance prediction** — BCE loss on atom–atom distance labels
+
+The auxiliary tasks act as structural regularisers, forcing the model to learn geometrically meaningful representations without requiring a docked pose as input.
+
+---
+
 ## Installation
 
 Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
@@ -29,40 +69,48 @@ By default this pulls PyTorch with **CUDA 12.1** support. Edit the index URL in 
 
 ### Prerequisites
 
-- PDBbind general set (v2019 recommended) — available at <http://pdbbind.org.cn/>
-- CASF-2016 core set (used as the held-out test set throughout training)
+The recommended dataset is the **PLANET_dataset** provided by the original authors (PDBbind 2020 with pre-generated decoy ligands and pre-defined train/valid/test splits). It is available on the PDBbind website alongside the paper.
+
+Alternatively, any PDBbind release can be used with a random train/valid split.
 
 ### Step 1 — preprocess structures
 
 Converts each PDBbind entry into a self-contained HDF5 pocket file (`<pdb>_pocket.h5`).
-pK values are parsed directly from the PDBbind INDEX file — no intermediate JSON needed.
+pK values are parsed directly from the PDBbind INDEX file.
+If a ligand SDF fails to parse (e.g. invalid valence), the script automatically falls back to the `.mol2` file.
 
 ```bash
+# Combine all index files into one for preprocessing
+cat PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
+    PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
+    PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
+    > PLANET_dataset/index/ALL.2020
+
 uv run preprocess.py \
-    -d $PDBBIND_DIR \
-    -i $PDBBIND_DIR/index/INDEX_general_PL_data.2019 \
+    -d PLANET_dataset/PDBbind2020-PLANET \
+    -i PLANET_dataset/index/ALL.2020 \
     -n 16
 ```
 
-Do the same for the CASF-2016 core set:
+Each entry directory must contain `<pdb>_ligand.sdf` (or `<pdb>_ligand.mol2` as fallback) and `<pdb>_protein.pdb`. Decoy ligands (`<pdb>_decoy.sdf`) are loaded automatically when present — they are part of the multi-objective training signal.
 
-```bash
-uv run preprocess.py \
-    -d $CASF_DIR \
-    -i $PDBBIND_DIR/index/INDEX_general_PL_data.2019 \
-    -n 8
-```
-
-Each entry directory should contain `<pdb>_ligand.sdf`, `<pdb>_protein.pdb`, and optionally `<pdb>_decoy.sdf`.
-After preprocessing, each directory will also contain `<pdb>_pocket.h5`.
-
-- **Protein:** fix broken residues and assign protonation states (e.g. Maestro `prepwizard`). **α-carbon of every residue must be present** — PLANET uses Cα positions for the protein graph.
-- **Ligands:** add hydrogens and assign ionisation states (e.g. Maestro `epik`, or RDKit).
+Add `--skip-existing` to resume an interrupted preprocessing run.
 
 ### Step 2 — train
 
-The dataset is built on-the-fly from the HDF5 files — no intermediate index files needed.
-CASF entries are automatically excluded from train/valid and used as the running test set.
+**Explicit split mode** (recommended — uses pre-defined index files, reproduces paper setup):
+
+```bash
+uv run train.py \
+    -d PLANET_dataset/PDBbind2020-PLANET \
+    -c PLANET_dataset/PDBbind2020-PLANET \
+    --train_index PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
+    --valid_index PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
+    --test_index  PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
+    -s checkpoints/
+```
+
+**Random split mode** (fallback when no index files are available — excludes CASF entries from training):
 
 ```bash
 uv run train.py \
@@ -75,8 +123,11 @@ To resume from a checkpoint:
 
 ```bash
 uv run train.py \
-    -d $PDBBIND_DIR \
-    -c $CASF_DIR \
+    -d PLANET_dataset/PDBbind2020-PLANET \
+    -c PLANET_dataset/PDBbind2020-PLANET \
+    --train_index PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
+    --valid_index PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
+    --test_index  PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
     -s checkpoints/ \
     --checkpoint checkpoints/PLANET.iter-50000 \
     --initial_step 50000
@@ -92,11 +143,14 @@ Key training arguments:
 | `--anneal_iter` | 20000 | LR decay interval in steps (after step 60k) |
 | `--save_iter` | 5000 | Checkpoint + eval interval (steps) |
 | `--print_iter` | 200 | Log interval (steps) |
-| `--valid_frac` | 0.1 | Fraction of PDBbind held out for validation |
+| `--train_index` | — | Index file for training set (explicit split mode) |
+| `--valid_index` | — | Index file for validation set (explicit split mode) |
+| `--test_index` | — | Index file for test set (explicit split mode) |
+| `--valid_frac` | 0.1 | Fraction held out for validation (random split mode) |
 | `--checkpoint` | — | Path to checkpoint to resume from |
 | `--initial_step` | 0 | Global step to start from (set when resuming) |
 
-### Step 3 — evaluate on CASF-2016
+### Step 3 — evaluate
 
 ```bash
 uv run evaluate.py \
