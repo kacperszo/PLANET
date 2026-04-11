@@ -79,8 +79,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-f','--model_file', required=True)
     parser.add_argument('-c','--casf_dir', required=True,
-                        help='CASF-2016/coreset directory')
+                        help='Directory with preprocessed pocket h5 files')
     parser.add_argument('-o','--out_path', required=True)
+    parser.add_argument('--index', default=None,
+                        help='PDBbind index file — evaluate only these PDB codes')
 
     parser.add_argument('--feature_dims', type=int, default=300)
     parser.add_argument('-n','--nheads', type=int, default=8)
@@ -96,7 +98,17 @@ if __name__ == '__main__':
                    args.pro_update_inters,args.lig_update_iters,args.pro_lig_update_iters,device).to(device)
     model.load_state_dict(torch.load(args.model_file, map_location=device, weights_only=True))
 
-    test_dataset = ProLigDataset(args.casf_dir, split='all',
+    pdb_ids = None
+    if args.index:
+        pdb_ids = set()
+        with open(args.index) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                pdb_ids.add(line.split()[0].lower())
+
+    test_dataset = ProLigDataset(args.casf_dir, pdb_ids=pdb_ids, split='all',
                                  batch_size=16, shuffle=False, decoy_flag=False)
 
     (predicted_lig_interactions, predicted_interactions, predicted_affinities,
