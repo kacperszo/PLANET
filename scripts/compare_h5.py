@@ -12,9 +12,13 @@ Example:
         /home/kszot/gnns/PLANET_dataset/PDBbind2020-PLANET \\
         /home/kszot/gnns/CASF-2013/coreset
 """
-import argparse, os, sys
+import argparse, hashlib, os, sys
 import h5py
 import numpy as np
+
+
+def _hash(arr: np.ndarray) -> str:
+    return hashlib.sha1(np.ascontiguousarray(arr).tobytes()).hexdigest()[:12]
 
 
 def summarise(path: str) -> dict:
@@ -29,11 +33,15 @@ def summarise(path: str) -> dict:
             'n_ligand_atoms': int(prolig.shape[0]),
             'res_sum': float(res.sum()),
             'res_mean': float(res.mean()),
+            'res_hash': _hash(res),
             'alpha_min': alpha.min(axis=0),
             'alpha_max': alpha.max(axis=0),
             'alpha_zero_rows': int((alpha == 0).all(axis=1).sum()),
+            'alpha_hash': _hash(alpha),
             'contacts': int(prolig.sum()),
+            'prolig_hash': _hash(prolig),
             'lig_bytes': int(lig.nbytes),
+            'lig_hash': _hash(lig),
         }
 
 
@@ -42,13 +50,13 @@ def print_summary(label: str, s: dict) -> None:
     print(f"  pK              : {s['pK']}")
     print(f"  n_residues      : {s['n_residues']}")
     print(f"  n_ligand_atoms  : {s['n_ligand_atoms']}")
-    print(f"  res_features    : sum={s['res_sum']:.3f}  mean={s['res_mean']:.4f}")
+    print(f"  res_features    : sum={s['res_sum']:.3f}  mean={s['res_mean']:.4f}  hash={s['res_hash']}")
     amin, amax = s['alpha_min'], s['alpha_max']
     print(f"  alpha range     : x[{amin[0]:.2f},{amax[0]:.2f}] "
-          f"y[{amin[1]:.2f},{amax[1]:.2f}] z[{amin[2]:.2f},{amax[2]:.2f}]")
+          f"y[{amin[1]:.2f},{amax[1]:.2f}] z[{amin[2]:.2f},{amax[2]:.2f}]  hash={s['alpha_hash']}")
     print(f"  alpha zero rows : {s['alpha_zero_rows']}/{s['n_residues']}")
-    print(f"  contacts        : {s['contacts']} (pairs within 4 Å)")
-    print(f"  ligand_mol size : {s['lig_bytes']} bytes")
+    print(f"  contacts        : {s['contacts']} (pairs within 4 Å)  hash={s['prolig_hash']}")
+    print(f"  ligand_mol      : {s['lig_bytes']} bytes  hash={s['lig_hash']}")
 
 
 def main() -> int:
@@ -79,7 +87,8 @@ def main() -> int:
     for label, s in summaries[1:]:
         print(f'\n[{base_label}] vs [{label}]')
         for key in ['pK', 'n_residues', 'n_ligand_atoms', 'contacts',
-                    'res_sum', 'alpha_zero_rows', 'lig_bytes']:
+                    'res_hash', 'alpha_hash', 'prolig_hash', 'lig_hash',
+                    'alpha_zero_rows', 'lig_bytes']:
             if base[key] != s[key]:
                 print(f'  {key:16s}: {base[key]}  ->  {s[key]}')
     return 0
