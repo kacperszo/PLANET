@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import scipy.stats as stats
-import argparse,os,json,h5py
+import argparse,os,json,h5py,csv
 from torch.utils.data import DataLoader
 from planet.model import PLANET
 from planet.data import ProLigDataset
@@ -34,9 +34,12 @@ def evaluate(model, test_dataset):
     model.eval()
     predicted_lig_interactions,predicted_interactions,predicted_affinities,lig_scopes,res_scopes = [],[],[],[],[]
     ligand_interactions,pro_lig_interactions,pKs = [],[],[]
+    pdb_ids = []
+
+    batch_paths = test_dataset.batches  # list of lists of h5 paths
 
     with torch.no_grad():
-        for (res_feature_batch,mol_feature_batch,targets) in test_loader:
+        for batch_idx, (res_feature_batch,mol_feature_batch,targets) in enumerate(test_loader):
             try:
                 (predicted_lig_interaction,predicted_interaction,predicted_affinity) = model(res_feature_batch,mol_feature_batch)
                 ligand_interaction,pro_lig_interaction,pK,_,_ = targets
@@ -50,6 +53,10 @@ def evaluate(model, test_dataset):
                 ligand_interactions.append(np.array(ligand_interaction.squeeze().detach().cpu()))
                 pro_lig_interactions.append(np.array(pro_lig_interaction.squeeze().detach().cpu()))
                 pKs.append(np.array(pK.squeeze().detach().cpu()))
+
+                paths = batch_paths[batch_idx]
+                for p in paths:
+                    pdb_ids.append(os.path.basename(os.path.dirname(p)))
 
             except Exception as e:
                 print(e)
@@ -70,8 +77,13 @@ def evaluate(model, test_dataset):
     print('MAE:{:.3f}\tRMSE:{:.3f}\tPearson R:{:.3f}\tSpearman:{:.3f}\tCI:{:.3f}'.format(
         MAE, RMSE, P_correlation, S_correlation, CI))
 
+    print('\n{:<8}  {:>8}  {:>8}  {:>8}'.format('PDB', 'pred', 'true', 'error'))
+    print('-' * 38)
+    for pdb, pred, true in zip(pdb_ids, predicted_affinities, pKs):
+        print('{:<8}  {:>8.3f}  {:>8.3f}  {:>+8.3f}'.format(pdb, pred, true, pred - true))
+
     return (predicted_lig_interactions, predicted_interactions, predicted_affinities,
-            ligand_interactions, pro_lig_interactions, pKs, lig_scopes, res_scopes, bonded_pairs)
+            ligand_interactions, pro_lig_interactions, pKs, lig_scopes, res_scopes, bonded_pairs, pdb_ids)
 
 
 if __name__ == '__main__':
@@ -113,10 +125,18 @@ if __name__ == '__main__':
 
     (predicted_lig_interactions, predicted_interactions, predicted_affinities,
      ligand_interactions, pro_lig_interactions, pKs,
-     lig_scopes, res_scopes, bonded_pairs) = evaluate(model, test_dataset)
+     lig_scopes, res_scopes, bonded_pairs, pdb_ids) = evaluate(model, test_dataset)
 
     out_h5 = args.out_path if args.out_path.endswith('.h5') else args.out_path + '.h5'
     out_json = out_h5[:-3] + '_meta.json'
+    out_csv = out_h5[:-3] + '_predictions.csv'
+
+    with open(out_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['pdb_id', 'predicted_pK', 'true_pK', 'error'])
+        for pdb, pred, true in zip(pdb_ids, predicted_affinities, pKs):
+            writer.writerow([pdb, f'{pred:.4f}', f'{true:.4f}', f'{pred - true:.4f}'])
+    print(f'Predictions saved to {out_csv}')
     with h5py.File(out_h5, 'w') as f:
         f.create_dataset('predicted_lig_interactions', data=predicted_lig_interactions)
         f.create_dataset('predicted_interactions',     data=predicted_interactions)
@@ -126,4 +146,4 @@ if __name__ == '__main__':
         f.create_dataset('pKs',                        data=pKs)
     with open(out_json, 'w') as f:
         json.dump({'lig_scopes': lig_scopes, 'res_scopes': res_scopes,
-                   'bonded_pairs': bonded_pairs}, f)
+                   'bonded_pairs': bonded_pairs, 'pdb_ids': pdb_ids}, f)
