@@ -33,3 +33,7 @@ environment.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# weight sets pulled from the training server — never versioned
+checkpoints_2020/
+results/
