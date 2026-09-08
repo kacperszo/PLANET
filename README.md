@@ -1,3 +1,34 @@
+<!-- gnn-benchmark:begin -->
+# Running this in gnn-benchmark
+
+One tier, on a current stack.
+
+| variant | capabilities | `gnnb verify` on CASF-2016 |
+|---|---|---|
+| `planet.modern` | predict, embed | 285/285, max abs diff 4.8e-06 |
+
+```bash
+podman build --format=docker -t planet:latest .
+
+gnnb verify --variant planet.modern --dataset data/CASF-2016/coreset
+gnnb run --variant planet.modern --capability predict --dataset <complexes> --gpu
+gnnb run --variant planet.modern --capability embed   --dataset <complexes>
+```
+
+**Preprocessing is not neutral.** The same PDB entry preprocessed from CASF-2013 and from
+PDBbind-2020 gives different pocket residue counts and different ligand atom counts, and the
+model scores R 0.22 versus R 0.75 depending on which it gets. Whatever dataset you pass has to
+come from the same provenance the checkpoint was trained on — that is a property of the
+dataset, not something the adapter can check.
+
+Preprocessing writes beside its inputs, so the adapter stages a copy into `/outputs` first: a
+model must never be able to mutate the corpus every other model is scored on. Details in
+[CLAUDE.md](CLAUDE.md).
+
+<!-- gnn-benchmark:end -->
+
+---
+
 # PLANET
 
 **P**rotein-**L**igand **A**ffinity prediction **NET**work — a graph neural network that predicts binding affinity from a protein pocket graph and a 2D ligand graph, without requiring exhaustive docking conformational sampling.
