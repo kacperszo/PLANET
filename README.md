@@ -25,6 +25,68 @@ Preprocessing writes beside its inputs, so the adapter stages a copy into `/outp
 model must never be able to mutate the corpus every other model is scored on. Details in
 [CLAUDE.md](CLAUDE.md).
 
+## Running it without the harness
+
+This fork runs on its own; the benchmark adds bookkeeping, not capability. Every
+command below is generated from the adapter by `gnnb howto`, so it cannot drift from
+what the harness actually runs — regenerate with `python tools/sync_model_readmes.py`.
+
+All of them run with `--network=none` and a read-only root filesystem. Nothing is
+fetched at run time; dependencies are resolved when the image is built.
+
+### What it eats
+
+One directory per complex, named after it:
+
+    <complexes>/<id>/<id>_protein.pdb
+    <complexes>/<id>/<id>_ligand.sdf      # or .mol2; several models try both
+
+Ligand 3D coordinates are read during preprocessing but only to build training targets; the authors trained with `use_rdkit_coords: true`, so the ligand enters as an RDKit conformer.
+
+### Build
+
+```bash
+podman build --format=docker -t planet:latest .
+```
+
+### Run
+
+```bash
+# planet.modern — localhost/planet:latest
+# source: models/planet
+
+# predict
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints_2020:/ckpt:ro" \
+    localhost/planet:latest \
+    sh -c 'set -e; mkdir -p /outputs/_staged; cp -r /data/. /outputs/_staged/; : > /outputs/_empty_index; python preprocess.py -d /outputs/_staged -i /outputs/_empty_index -n 8; python predict_complexes.py --complexes /outputs/_staged --model /ckpt/PLANET.iter-145000 --out /outputs/predictions.csv --device cpu; rm -rf /outputs/_staged /outputs/_empty_index'
+
+# embed
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints_2020:/ckpt:ro" \
+    localhost/planet:latest \
+    sh -c 'set -e; mkdir -p /outputs/_staged; cp -r /data/. /outputs/_staged/; : > /outputs/_empty_index; python preprocess.py -d /outputs/_staged -i /outputs/_empty_index -n 8; python embed_complexes.py --complexes /outputs/_staged --model /ckpt/PLANET.iter-145000 --out /outputs/embeddings.npz --pool sum --device cpu; rm -rf /outputs/_staged /outputs/_empty_index'
+```
+
+### What comes out
+
+| file | holds |
+|---|---|
+| `predictions.csv` | `complex_id,y_pred` |
+| `embeddings.npz` | `ids` and `vectors`, 600-dim — pooled cross-attention output for each side, concatenated. Ours: the heads run per atom-residue pair and pooling collapses them to scalars, so no complex vector exists in the architecture |
+
+### Before you trust the numbers
+
+Trained on PDBbind 2020, so anything scored with it has to come from the same preprocessing provenance. The checkpoint used here is iter-145000, best by validation Pearson R and also best on the authors' test set and on CASF — chosen without cherry-picking.
+
 <!-- gnn-benchmark:end -->
 
 ---
