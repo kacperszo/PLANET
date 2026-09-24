@@ -1,247 +1,68 @@
 # planet — the authors' original README
 
-Kept for attribution and for the authors' own description of the method. **Its
-instructions are not current for this fork** — see [README.md](README.md) for how to
-build and run what is actually here.
+Reproduced verbatim from `README.md` at upstream commit `2e49ae820a`, the newest commit in
+this history that we did not author. Kept for attribution and for the authors' own
+description of the method. **Its instructions are not current for this fork** — see
+[README.md](README.md) for how to build and run what is actually here.
+
+Verbatim is checked, not claimed: `tools/check_upstream_readmes.py` compares the body
+below against that commit byte for byte.
 
 ---
 
-# PLANET
+# **PLANET**
 
-**P**rotein-**L**igand **A**ffinity prediction **NET**work — a graph neural network that predicts binding affinity from a protein pocket graph and a 2D ligand graph, without requiring exhaustive docking conformational sampling.
+### PLANET: _**P**rotein-**L**igand **A**ffinity prediction **NET**work_
 
-PLANET was trained on PDBbind v2019 with three simultaneous objectives: binding affinity regression, protein-ligand contact map prediction, and intra-ligand distance matrix prediction. On the CASF-2016 benchmark it matches state-of-the-art 3D complex-based models while running at a fraction of the compute cost — making it practical for large-scale virtual screening.
+Predicting protein-ligand binding affinity is still a central issue in drug design. No wonder various deep learning models have been developed in recent years to tackle this issue in one aspect or another. So far most of them merely focus on reproducing the binding affinity of known binders (i.e. so-called “scoring power”).<br>
+Here, we have developed a graph neural network model called PLANET (Protein-Ligand Affinity prediction NETwork). This model takes the graph-represented 3D structure of the binding pocket on the target protein and the 2D structural graph of the ligand molecule as inputs. PLANET was trained through a multi-objective process with three related tasks, i.e. deriving protein-ligand binding affinity, protein-ligand contact map, and intra-ligand distance matrix. <br>
+As tested on the CASF-2016 benchmark, PLANET exhibited a comparable level of scoring power as some other machine learning models that rely on 3D protein-ligand complex structures as inputs. Besides, it exhibited notably better performance in virtual screening trials on the DUD-E and LIT-PCBA benchmarks. Compared to the popular conventional docking program GLIDE, PLANET took less than one percent of computation time to finish the same virtual screening job without a significant loss in accuracy because it did not need to perform exhaustive conformational sampling. In summary, PLANET achieved a decent performance in virtual screening as well as predicting protein-ligand binding affinity. This feature makes PLANET an attractive tool for drug discovery in the real world.
 
-Original paper: [PLANET: A Multi-Objective Graph Neural Network Model for Protein–Ligand Binding Affinity Prediction](https://doi.org/10.1021/acs.jcim.2c01085)
-
----
-
-## How it works
-
-PLANET takes as input a **protein pocket** (residue sequence + Cα coordinates only — no side chains, no docked pose) and a **2D ligand graph** (atoms + bonds), and predicts binding affinity in pK units.
-
-```
-Protein pocket                       Ligand (2D graph)
-  residues × BLOSUM62 (20-dim)         atoms × physicochemical features
-  + Cα coordinates                     + bond features
-        │                                     │
-   ProteinEGNN                           LigandGAT
-  (E(n)-equivariant                  (graph attention,
-   message passing,                   bond-message
-   3 iterations)                      passing, 10 iters)
-        │                                     │
-        └──────── ProteinLigandAttention ──────┘
-                  (bidirectional cross-attention
-                   between residues and atoms,
-                   1 iteration)
-                         │
-                       ProLig
-                  (element-wise product
-                   of protein × ligand features)
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-   intra-ligand    protein-ligand    binding
-   distance map    contact map       affinity (pK)
-```
-
-**ProteinEGNN** encodes the pocket using Cα–Cα squared distances as edge features, making it invariant to rotation and translation. **LigandGAT** encodes the ligand using a bond-centric message passing scheme. **ProteinLigandAttention** lets residue and atom representations update each other via cross-attention. The final **ProLig** head predicts all three outputs from element-wise products of the cross-attended features.
-
-The model is trained with three simultaneous objectives:
-1. **Affinity regression** — MSE loss on pK values (masked where pK = 0)
-2. **Protein-ligand contact prediction** — BCE loss on atom–residue contact labels (4 Å threshold)
-3. **Intra-ligand distance prediction** — BCE loss on atom–atom distance labels
-
-The auxiliary tasks act as structural regularisers, forcing the model to learn geometrically meaningful representations without requiring a docked pose as input.
-
----
-
-## Installation
-
-Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
-
+### Usage
+1. Setup dependencies (requires [uv](https://docs.astral.sh/uv/))
 ```bash
 uv sync
 ```
+This installs PyTorch with CUDA 12.1 support by default. For CPU-only or a different CUDA version edit the index URL in `pyproject.toml` before running `uv sync`:
+- CPU: `https://download.pytorch.org/whl/cpu`
+- CUDA 12.4: `https://download.pytorch.org/whl/cu124`
 
-By default this pulls PyTorch with **CUDA 12.1** support. Edit the index URL in `pyproject.toml` before running `uv sync` to change this:
-
-| Target | URL |
-|--------|-----|
-| CPU only | `https://download.pytorch.org/whl/cpu` |
-| CUDA 12.4 | `https://download.pytorch.org/whl/cu124` |
-
----
-
-## Training on PDBbind
-
-### Prerequisites
-
-The recommended dataset is the **PLANET_dataset** provided by the original authors (PDBbind 2020 with pre-generated decoy ligands and pre-defined train/valid/test splits). It is available on the PDBbind website alongside the paper.
-
-Alternatively, any PDBbind release can be used with a random train/valid split.
-
-### Step 1 — preprocess structures
-
-Converts each PDBbind entry into a self-contained HDF5 pocket file (`<pdb>_pocket.h5`).
-pK values are parsed directly from the PDBbind INDEX file.
-If a ligand SDF fails to parse (e.g. invalid valence), the script automatically falls back to the `.mol2` file.
-
+2. Using PLANET <br>
+We have created a demo folder which includes a protein file (adrb2.pdb), a crystal ligand file (adrb2_ligand.sdf) as well as molecules (mols.sdf) to be estimated. These files are  originally derived from DUD-E dataset and prepared as below: <br>
+(1) The protein structure file (.pdb) are prepared using *prepwizard* in Maestro, including fixing broken residues and assign protonated states. Other structure preparation tools can also be applied. _NOTE:_ The most important is that $\alpha$-carbon of each reasidues must be correctly fixed in the .pdb file.
+(2) The molecule files (mols.sdf) are prepared using *epik* in Maestro, including adding hydrogen atoms and ionized states. the adrb2_ligand.sdf file is only used for determining binding pocket (only need to be in .sdf format).
 ```bash
-# Combine all index files into one for preprocessing
-cat PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
-    PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
-    PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
-    > PLANET_dataset/index/ALL.2020
-
-uv run preprocess.py \
-    -d PLANET_dataset/PDBbind2020-PLANET \
-    -i PLANET_dataset/index/ALL.2020 \
-    -n 16
+cd demo
+uv run ../PLANET_run.py -p adrb2.pdb -l adrb2_ligand.sdf -m mols.sdf
 ```
+3. Parameters
+   - _-p or --protein_, protein structure file;
+   - _-l or --ligand_, crystal ligand file for determining binding pocket, if specified, override the coordinate provided.
+   - _-x or --center_x ; -y or --center_y ; -z or --center_z , coordinates to define the center of binding pocket, same as follows
+   - _-m or --mol_file_, molecules to be esitmated in .sdf format
+   - _--prefix_, if not specified, the default is "result", that is the outcome will be saved as "result.csv" and "result.sdf"
+4. Output files <br>
+We provide two output formats including .csv and .sdf
 
-Each entry directory must contain `<pdb>_ligand.sdf` (or `<pdb>_ligand.mol2` as fallback) and `<pdb>_protein.pdb`. Decoy ligands (`<pdb>_decoy.sdf`) are loaded automatically when present — they are part of the multi-objective training signal.
+### Training PLANET on PDBbind
+Training data (PDBbind general set v.2020) can be accessed at http://pdbbind.org.cn/. <br>
+Suppose `$DATASET` is the absolute path to your PDBbind dataset directory, `$PK_JSON` is the path to your `PDBbind2020.json` file with pK values, and `$PLANET` is the repo root.
 
-Add `--skip-existing` to resume an interrupted preprocessing run.
-
-### Step 2 — train
-
-**Explicit split mode** (recommended — uses pre-defined index files, reproduces paper setup):
-
+**Step 1 – preprocess structures (runs in parallel with `$NJOBS` workers):**
 ```bash
-uv run train.py \
-    -d PLANET_dataset/PDBbind2020-PLANET \
-    -c PLANET_dataset/PDBbind2020-PLANET \
-    --train_index PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
-    --valid_index PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
-    --test_index  PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
-    -s checkpoints/
+uv run $PLANET/process_PDBBind.py -d $DATASET -n $NJOBS -k $PK_JSON
 ```
 
-**Random split mode** (fallback when no index files are available — excludes CASF entries from training):
-
+**Step 2 – build train/valid/core pickle files:**
 ```bash
-uv run train.py \
-    -d $PDBBIND_DIR \
-    -c $CASF_DIR \
-    -s checkpoints/
+uv run $PLANET/PLANET_datautils.py -p $DATASET -d $PLANET/data/
 ```
 
-To resume from a checkpoint:
-
+**Step 3 – train:**
 ```bash
-uv run train.py \
-    -d PLANET_dataset/PDBbind2020-PLANET \
-    -c PLANET_dataset/PDBbind2020-PLANET \
-    --train_index PLANET_dataset/index/PDBbind_PLANET_TrainSet.2020 \
-    --valid_index PLANET_dataset/index/PDBbind_PLANET_ValidSet.2020 \
-    --test_index  PLANET_dataset/index/PDBbind_PLANET_TestSet.2020 \
-    -s checkpoints/ \
-    --checkpoint checkpoints/PLANET.iter-50000 \
-    --initial_step 50000
-```
-
-Key training arguments:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--epoch` | 250 | Number of epochs |
-| `--batch_size` | 16 | Complexes per batch |
-| `--lr` | 1e-4 | Initial learning rate |
-| `--anneal_iter` | 20000 | LR decay interval in steps (after step 60k) |
-| `--save_iter` | 5000 | Checkpoint + eval interval (steps) |
-| `--print_iter` | 200 | Log interval (steps) |
-| `--train_index` | — | Index file for training set (explicit split mode) |
-| `--valid_index` | — | Index file for validation set (explicit split mode) |
-| `--test_index` | — | Index file for test set (explicit split mode) |
-| `--valid_frac` | 0.1 | Fraction held out for validation (random split mode) |
-| `--checkpoint` | — | Path to checkpoint to resume from |
-| `--initial_step` | 0 | Global step to start from (set when resuming) |
-
-### Step 3 — evaluate
-
-```bash
-uv run evaluate.py \
-    -f checkpoints/PLANET.iter-XXXXX \
-    -c $CASF_DIR \
-    -o results/casf
-```
-
-Prints MAE, RMSE, Pearson R, Spearman ρ, and Concordance Index (CI).
-Saves predictions to `results/casf.h5` (arrays) and `results/casf_meta.json` (scopes + bonded pairs).
-
----
-
-## Virtual screening
-
-Score a library of molecules against a protein pocket using a trained checkpoint.
-The pocket can be defined either by a crystal ligand SDF or by explicit coordinates.
-
-```bash
-# pocket defined by crystal ligand
-uv run screen.py \
-    -p protein.pdb \
-    -l crystal_ligand.sdf \
-    -m library.sdf \
-    -w checkpoints/PLANET.iter-100000 \
-    --prefix result
-
-# pocket defined by centre coordinates
-uv run screen.py \
-    -p protein.pdb \
-    -x 12.3 -y 45.6 -z 78.9 \
-    -m library.smi \
-    -w checkpoints/PLANET.iter-100000 \
-    --prefix result
-```
-
-Outputs `result.csv` and `result.sdf` with predicted affinities (pK units).
-
-`screen.py` is also installed as a `planet-screen` entry point:
-
-```bash
-planet-screen -p protein.pdb -l ligand.sdf -m library.sdf \
-    -w checkpoints/PLANET.iter-100000
-```
-
-| Flag | Description |
-|------|-------------|
-| `-p / --protein` | Protein structure file (`.pdb`) |
-| `-l / --ligand` | Crystal ligand SDF — defines pocket centre |
-| `-x/-y/-z` | Pocket centre coordinates (alternative to `-l`) |
-| `-m / --mol_file` | Molecules to score (`.sdf` or `.smi`) |
-| `-w / --checkpoint` | Trained model checkpoint |
-| `--prefix` | Output file prefix (default: `result`) |
-
----
-
-## Data format
-
-Each preprocessed complex is stored as `<pdb>_pocket.h5` (gzip-compressed HDF5):
-
-| Key | Shape | Description |
-|-----|-------|-------------|
-| `res_features` | `[n_res, 20]` | BLOSUM62 residue features |
-| `alpha_coordinates` | `[n_res, 3]` | Cα positions |
-| `pro_lig_interaction` | `[n_atoms, n_res]` | Contact labels (4 Å threshold) |
-| `ligand_mol` | `[N]` uint8 | RDKit molecule binary |
-| `decoys/0..k` | `[M]` uint8 | Decoy molecule binaries |
-| attrs: `pK` | float | Binding affinity |
-| attrs: `decoys_count` | int | Number of decoys |
-
----
-
-## Repository layout
-
-```
-train.py          — training loop
-evaluate.py       — CASF-2016 evaluation
-screen.py         — virtual screening inference
-preprocess.py     — preprocessing: PDBbind → per-complex HDF5
-planet/
-  model.py        — PLANET nn.Module
-  data.py         — ProLigDataset (on-the-fly HDF5 loader)
-  chem.py         — featurisation, ComplexPocket, HDF5 I/O
-  layers.py       — ProteinEGNN, LigandGAT, ProLig layers
-  utils.py        — tensor utilities
+uv run $PLANET/PLANET_train.py \
+    -t $PLANET/data/train.pkl \
+    -v $PLANET/data/valid.pkl \
+    -te $PLANET/data/core.pkl \
+    -d .
 ```
