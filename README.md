@@ -67,6 +67,32 @@ podman run --rm \
     -v "$PWD/checkpoints_2020:/ckpt:ro" \
     localhost/planet:latest \
     sh -c 'set -e; mkdir -p /outputs/_staged; cp -r /data/. /outputs/_staged/; : > /outputs/_empty_index; python preprocess.py -d /outputs/_staged -i /outputs/_empty_index -n 8; python embed_complexes.py --complexes /outputs/_staged --model /ckpt/PLANET.iter-145000 --out /outputs/embeddings.npz --pool sum --device cpu; rm -rf /outputs/_staged /outputs/_empty_index'
+
+# train
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints_2020:/ckpt:ro" \
+    -v /path/to/splits:/splits:ro \
+    -v /path/to/cache:/cache:rw,U \
+    --shm-size 4g \
+    localhost/planet:latest \
+    sh -c 'cd /work && python prepare_h5.py --complexes /data --index /data/index/INDEX_general_PL_data.2019 --labels /splits/train.csv --out /cache/planet_h5 --skip-existing && python prepare_h5.py --complexes /data --index /data/index/INDEX_general_PL_data.2019 --labels /splits/val.csv --out /cache/planet_h5 --skip-existing && python train_contract.py --data-dir /cache/planet_h5 --train-labels /splits/train.csv --out /outputs --seed 0 --val-labels /splits/val.csv --epochs 30 --device cpu'
+
+# finetune  (encoder frozen; drop --freeze-encoder to tune all of it)
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints_2020:/ckpt:ro" \
+    -v /path/to/splits:/splits:ro \
+    -v /path/to/cache:/cache:rw,U \
+    --shm-size 4g \
+    localhost/planet:latest \
+    sh -c 'cd /work && python prepare_h5.py --complexes /data --index /data/index/INDEX_general_PL_data.2019 --labels /splits/train.csv --out /cache/planet_h5 --skip-existing && python prepare_h5.py --complexes /data --index /data/index/INDEX_general_PL_data.2019 --labels /splits/val.csv --out /cache/planet_h5 --skip-existing && python train_contract.py --data-dir /cache/planet_h5 --train-labels /splits/train.csv --out /outputs --seed 0 --val-labels /splits/val.csv --epochs 30 --init-encoder /ckpt/encoder.pt --freeze-encoder --device cpu'
 ```
 
 ## What comes out
