@@ -1,5 +1,10 @@
 # CLAUDE.md — PLANET
 
+Update 2026-10-20: supervised training now validates CSV/index/HDF5 labels,
+uses epoch-dependent reproducible shuffling and fails on invalid validation.
+See `AGENTS.md`, `PATCHES.md`, and `test_training_contract.py`. Unlabelled
+inference still allows missing pK; the stricter rules apply to training.
+
 ## What this is
 
 Affinity prediction from a **protein pocket (residue sequence + Cα coordinates only)** and a

@@ -35,11 +35,10 @@ paragraph previously claimed the decoys were being swapped in.
 
 ## What the split file means here
 
-Every other model in the roster reads `y_true` out of the split. PLANET does not: its pK comes
-from the HDF5 attribute that `preprocess.py` wrote from the PDBbind index, and the dataset is
-addressed by PDB code. So the split's `complex_id` column selects the complexes and its `y_true`
-column is **not** consulted. That is worth stating rather than hiding — if the two ever disagree,
-this trainer follows the preprocessing, and `summary.json` records the split file it was given.
+pK is stored in HDF5 by preprocessing, but the split's y_true is authoritative
+for the supervised task. Every requested file and label must be present and agree
+before training. Missing/non-finite labels, zero (the model's missing-label
+sentinel), duplicates and mismatches fail explicitly; cached data are never rewritten.
 
 usage:
     python train_contract.py --data-dir /cache/planet_h5 --train-labels /splits/train.csv \
@@ -59,6 +58,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from label_contract import read_labels, validate_h5
 from planet.data import ProLigDataset
 from planet.model import PLANET
 from planet.transfer import set_training_mode, transfer_encoder
@@ -101,15 +101,6 @@ def count_decoys(data_dir: str, ids: set[str]) -> int:
     return with_decoys
 
 
-def read_ids(path: str) -> set[str]:
-    """PDB codes from a harness split file (complex_id,y_true). See the note in the docstring
-    about why `y_true` is read and discarded."""
-    with open(path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    if not rows or "complex_id" not in rows[0]:
-        raise SystemExit(f"{path}: split file needs a complex_id column")
-    return {r["complex_id"].lower() for r in rows}
-
 
 def authors_init(model: nn.Module) -> None:
     """train.py:152-156, verbatim in effect."""
@@ -128,33 +119,31 @@ def loader_for(dataset) -> DataLoader:
 
 
 def run_eval(model, loader, device) -> tuple[float, float]:
-    """Total loss and affinity Pearson R over a loader, model left as it was found."""
+    """Evaluate every batch; failed or empty validation cannot select a checkpoint."""
     was_training = model.training
     model.eval()
     losses, preds, trues = [], [], []
-    with torch.no_grad():
-        for res_batch, mol_batch, targets in loader:
-            try:
+    try:
+        with torch.no_grad():
+            for res_batch, mol_batch, targets in loader:
                 predictions = model(res_batch, mol_batch)
-                lig_loss, prolig_loss, aff_loss = model.compute_loss(
-                    predictions, targets, res_batch, mol_batch)
-            except Exception as e:
-                print(f"  skipping a validation batch: {type(e).__name__}: {e}")
-                continue
-            losses.append(float(lig_loss + prolig_loss + aff_loss))
-            # Only complexes that actually carry an affinity contribute to R; pK_flags is the
-            # authors' own mask for the ones that do.
-            pKs, flags = targets[2], targets[3]
-            affinities = predictions[2].detach().cpu().numpy()
-            pKs, flags = pKs.cpu().numpy(), flags.cpu().numpy()
-            # With decoy_flag=False the authors set every pK_flag to 1, including complexes
-            # whose pK is 0 because the index had no entry for them. Those are not
-            # measurements, so they are kept out of R here.
-            keep = (flags > 0) & (pKs != 0)
-            preds.extend(affinities[keep].tolist())
-            trues.extend(pKs[keep].tolist())
-    model.train(was_training)
-    return (sum(losses) / max(len(losses), 1)), pearson(trues, preds)
+                components = model.compute_loss(predictions, targets, res_batch, mol_batch)
+                loss = float(sum(components))
+                if not np.isfinite(loss):
+                    raise FloatingPointError("non-finite validation objective")
+                losses.append(loss)
+                pKs, flags = targets[2].cpu().numpy(), targets[3].cpu().numpy()
+                affinities = predictions[2].detach().cpu().numpy()
+                keep = flags > 0
+                if not np.isfinite(affinities[keep]).all() or not np.isfinite(pKs[keep]).all():
+                    raise FloatingPointError("non-finite validation predictions or labels")
+                preds.extend(affinities[keep].tolist())
+                trues.extend(pKs[keep].tolist())
+        if not losses or not trues:
+            raise ValueError("empty validation or no labelled validation complexes")
+        return sum(losses) / len(losses), pearson(trues, preds)
+    finally:
+        model.train(was_training)
 
 
 def main() -> None:
@@ -182,14 +171,21 @@ def main() -> None:
     epochs = args.epochs if args.epochs is not None else AUTHOR_EPOCHS
     batch_size = args.batch_size if args.batch_size is not None else AUTHOR_BATCH_SIZE
     lr = args.lr if args.lr is not None else AUTHOR_LR
+    if epochs <= 0 or batch_size <= 0 or not np.isfinite(lr) or lr <= 0:
+        raise ValueError("epochs, batch size and learning rate must be positive and finite")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
 
     device = args.device if (torch.cuda.is_available() and args.device.startswith("cuda")) else "cpu"
-    train_ids = read_ids(args.train_labels)
-    val_ids = read_ids(args.val_labels) if args.val_labels else None
+    train_labels = read_labels(args.train_labels)
+    val_labels = read_labels(args.val_labels) if args.val_labels else None
+    validate_h5(args.data_dir, train_labels)
+    if val_labels is not None:
+        validate_h5(args.data_dir, val_labels)
+    train_ids = set(train_labels)
+    val_ids = set(val_labels) if val_labels is not None else None
     print(f"device {device} | epochs {epochs} | batch {batch_size} | lr {lr}")
     print(f"{len(train_ids)} training complexes"
           + (f", {len(val_ids)} validation" if val_ids else ", no validation split"))
@@ -229,7 +225,7 @@ def main() -> None:
         # Rebuilt every epoch, as theirs is, so each epoch draws fresh decoy ligands.
         train_loader = loader_for(ProLigDataset(args.data_dir, pdb_ids=train_ids,
                                                 batch_size=batch_size, shuffle=True,
-                                                decoy_flag=True))
+                                                seed=args.seed + epoch, decoy_flag=True))
         set_training_mode(model, True, frozen_encoder=args.freeze_encoder)
         losses, lig_losses, prolig_losses, aff_losses = [], [], [], []
         preds, trues = [], []
@@ -241,9 +237,11 @@ def main() -> None:
                 predictions, targets, res_batch, mol_batch)
             beta = 0.0 if total_step <= AFFINITY_WARMUP_STEPS else 1.0
             objective = lig_loss + prolig_loss + beta * aff_loss
+            if not torch.isfinite(objective):
+                raise FloatingPointError("non-finite training objective")
             objective.backward()
             nn.utils.clip_grad_norm_(
-                filter(lambda p: p.requires_grad, model.parameters()), AUTHOR_CLIP_NORM)
+                filter(lambda p: p.requires_grad, model.parameters()), AUTHOR_CLIP_NORM, error_if_nonfinite=True)
             optimizer.step()
             total_step += 1
 
@@ -305,7 +303,8 @@ def main() -> None:
         "seed": args.seed, "epochs_requested": epochs, "batch_size": batch_size, "lr": lr,
         "train_labels": args.train_labels, "val_labels": args.val_labels,
         # Said out loud: the split chose the complexes, the HDF5 attributes gave the pK.
-        "labels_from": "preprocess.py HDF5 attributes, not the split's y_true column",
+        "labels_from": "HDF5 attributes validated against split y_true (atol=1e-5)",
+        "shuffle_seed": "seed + epoch, sorted initial record list",
         # 0 means the authors' negative-sampling objective did not run — see the docstring.
         "training_complexes_with_decoys": with_decoys,
         "freeze_encoder": bool(args.freeze_encoder),

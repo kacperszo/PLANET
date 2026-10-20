@@ -11,7 +11,7 @@ exactly what `ProLigDataset` scans for. The featurisation itself is the authors'
 is imported unchanged, with the same four arguments `preprocess.py` passes it.
 
 pK comes from the PDBbind index, as theirs does, not from the split's `y_true` column. See the
-note in `train_contract.py` about why the two are kept separate.
+validation in `train_contract.py`: both sources must agree before training.
 
 usage:
     python prepare_h5.py --complexes /data --index /data/index/INDEX_general_PL_data.2019 \
@@ -28,6 +28,7 @@ from multiprocessing import Pool
 from tqdm import tqdm
 
 from planet.chem import ComplexPocket
+from label_contract import read_labels, validate_pk
 
 
 def parse_index(index_path: str) -> dict[str, float]:
@@ -53,6 +54,7 @@ def process_one(job):
     target_dir = os.path.join(out_dir, pdb_id)
     h5_path = os.path.join(target_dir, f'{pdb_id}_pocket.h5')
     if skip_existing and os.path.exists(h5_path):
+        validate_pk(pdb_id, pK, ComplexPocket.read_pk(h5_path), h5_path)
         return pdb_id, 'cached'
 
     source = os.path.join(complexes, pdb_id)
@@ -81,33 +83,15 @@ def main() -> None:
     pk_data = parse_index(args.index)
     print(f"{len(pk_data)} pK entries in the index")
 
-    with open(args.labels, newline="") as f:
-        rows = list(csv.DictReader(f))
-    ids = [r["complex_id"].lower() for r in rows]
-
-    # The pK that trains PLANET comes from the index, not from the split. Say out loud if the
-    # two disagree, rather than letting the split's y_true column look authoritative.
-    disagree = [(r["complex_id"], float(r["y_true"]), pk_data[r["complex_id"].lower()])
-                for r in rows
-                if r["complex_id"].lower() in pk_data
-                and abs(float(r["y_true"]) - pk_data[r["complex_id"].lower()]) > 0.01]
-    if disagree:
-        print(f"{len(disagree)} complexes carry a different affinity in the split than in the "
-              f"index; PLANET trains on the index value:")
-        for cid, split_y, index_y in disagree[:10]:
-            print(f"  {cid}: split {split_y}, index {index_y}")
-
-    jobs = [(i, args.complexes, args.out, pk_data.get(i, 0), args.skip_existing)
-            for i in ids if os.path.isdir(os.path.join(args.complexes, i))]
-    absent = len(ids) - len(jobs)
-    if absent:
-        print(f"{absent} of {len(ids)} complexes in the split are not in {args.complexes}")
-    missing_pk = sum(1 for j in jobs if j[3] == 0)
-    if missing_pk:
-        print(f"{missing_pk} have no pK in the index and will carry 0. In training they "
-              f"still contribute the two interaction objectives, because pK_flags masks the "
-              f"affinity term; in validation the authors set every flag to 1, so "
-              f"train_contract.py drops pK == 0 from the correlation instead")
+    labels = read_labels(args.labels)
+    for cid, expected in labels.items():
+        if cid not in pk_data:
+            raise ValueError(f"{args.index}: missing label for {cid}")
+        validate_pk(cid, expected, pk_data[cid], args.index)
+        if not os.path.isdir(os.path.join(args.complexes, cid)):
+            raise ValueError(f"missing input complex {cid}; make exclusions explicit in the split")
+    jobs = [(cid, args.complexes, args.out, pk_data[cid], args.skip_existing)
+            for cid in labels]
 
     os.makedirs(args.out, exist_ok=True)
     print(f"preprocessing {len(jobs)} complexes into {args.out}")

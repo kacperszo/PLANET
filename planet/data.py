@@ -45,7 +45,7 @@ class ProLigDataset(Dataset):
             # explicit mode: use exactly the given PDB codes
             pdb_ids = {x.lower() for x in pdb_ids}
             records = []
-            for pdb in os.listdir(data_dir):
+            for pdb in sorted(os.listdir(data_dir)):
                 if pdb.lower() not in pdb_ids:
                     continue
                 h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
@@ -56,7 +56,7 @@ class ProLigDataset(Dataset):
             # random split mode
             exclude_ids = {x.lower() for x in (exclude_ids or set())}
             records = []
-            for pdb in os.listdir(data_dir):
+            for pdb in sorted(os.listdir(data_dir)):
                 if pdb.lower() in exclude_ids:
                     continue
                 h5_path = os.path.join(data_dir, pdb, f'{pdb}_pocket.h5')
