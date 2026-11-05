@@ -37,3 +37,6 @@ Thumbs.db
 # large weight sets; see README for how to obtain or train them
 checkpoints_2020/
 results/
+
+# local assistant settings: hold absolute paths from the machine they were written on
+.claude/
