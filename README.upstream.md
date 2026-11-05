@@ -1,12 +1,11 @@
-# planet — the authors' original README
+# planet — the upstream README
 
-Reproduced verbatim from `README.md` at upstream commit `2e49ae820a`, the newest commit in
-this history that we did not author. Kept for attribution and for the authors' own
-description of the method. **Its instructions are not current for this fork** — see
-[README.md](README.md) for how to build and run what is actually here.
-
-Verbatim is checked, not claimed: `tools/check_upstream_readmes.py` compares the body
-below against that commit byte for byte.
+Reproduced from `README.md` at commit `2e49ae820a`, kept for attribution and for the authors'
+description of the method. That commit is a merge of this fork's own pull request #15, so the
+`uv sync` usage section below was written in this fork, not by the authors; the method description
+is theirs. **Its instructions are not current for this fork** — see
+[README.md](README.md) for how to build and run what is actually here. Diff against that commit
+to see exactly what differs.
 
 ---
 

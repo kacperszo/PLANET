@@ -1,9 +1,9 @@
 """Move a trained encoder into a fresh PLANET, and freeze it if asked.
 
-The harness cuts checkpoints on the host (`gnnb encoder split`); this is the other half, and it
-has to live in the model's own container because loading weights back needs the model class.
+An encoder file is a checkpoint with the head tensors removed (see `HEAD_PREFIXES`); this loads
+one back. It has to live in the model's own container because loading weights needs the model class.
 
-**Where PLANET's boundary is.** The registry declared `head = ["FC"]` until 2026-09-13, a module
+**Where PLANET's boundary is.** An earlier version declared the head as `["FC"]`, a module
 this model does not have — the checkpoint carries `proteinegnn`, `ligandgat` and `prolig` and
 nothing else, so the split refused and nobody had run it.
 
@@ -27,8 +27,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-#: The three prediction heads, by parameter-name prefix. Must agree with `encoder.head` for
-#: planet.modern in harness/registry.toml — the harness cuts the file and this loads it.
+#: The three prediction heads, by parameter-name prefix. Whatever cuts an encoder file out of a
+#: checkpoint must drop exactly these, and this module loads the result.
 HEAD_PREFIXES = (
     "prolig.linear_lig_interaction",
     "prolig.linear_lig_interaction_last",
@@ -82,7 +82,7 @@ def transfer_encoder(model: nn.Module, path: str, freeze: bool = False) -> dict[
     if head_keys:
         raise SystemExit(
             f"{path} carries {len(head_keys)} head tensors ({head_keys[:3]}). That is a whole "
-            f"checkpoint, not an encoder — cut it with `gnnb encoder split` first."
+            f"checkpoint, not an encoder — pass a file holding encoder tensors only."
         )
     unknown = [k for k in encoder if k not in target]
     if unknown:
@@ -126,7 +126,7 @@ def set_training_mode(model: nn.Module, training: bool, frozen_encoder: bool) ->
     `model.train(training)`. It is here anyway, in the same shape as SIGN's and SS-GNN's,
     because the rule belongs to the contract rather than to whichever layers a model happens
     to have: a frozen encoder must produce the same representation every step, or
-    `--freeze-encoder` is measuring something other than what `gnnb probe` measures.
+    `--freeze-encoder` is measuring something other than a fixed representation.
     """
     if not training or not frozen_encoder:
         model.train(training)

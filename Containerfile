@@ -23,5 +23,7 @@ RUN python -c "import torch, numpy, scipy, pandas, sklearn, matplotlib, rdkit, h
 print('env ok', torch.__version__)"
 
 WORKDIR /work
+# Weights (checkpoints/, checkpoints_2020/, *.param) are gitignored and excluded by .containerignore;
+# mount them at run time. Do not rely on them being in the image.
 COPY . /work
 RUN python -c "from planet.model import PLANET; from planet.data import ProLigDataset; print('planet imports ok')"

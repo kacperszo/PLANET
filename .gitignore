@@ -34,6 +34,6 @@ environment.yml
 .DS_Store
 Thumbs.db
 
-# weight sets pulled from the training server — never versioned
+# large weight sets; see README for how to obtain or train them
 checkpoints_2020/
 results/

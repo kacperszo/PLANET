@@ -1,4 +1,4 @@
-"""Train PLANET to the harness training contract.
+"""Train PLANET with an explicit, reproducible training contract.
 
 Beside the authors' `train.py`, not instead of it. Theirs trains on a directory, splits by
 PDBbind index files or a random fraction, counts in optimiser steps and writes checkpoints named
@@ -6,7 +6,7 @@ PDBbind index files or a random fraction, counts in optimiser steps and writes c
 argument, needs to start from somebody else's encoder, and needs a per-epoch curve that can be
 put beside another model's — so this file exists and the model is imported unchanged.
 
-Outputs follow `harness/training.py` — `model.pt`, `history.csv`, `summary.json`.
+Outputs are `model.pt`, `history.csv`, `summary.json`.
 
 ## Three things reproduced deliberately
 
@@ -147,7 +147,7 @@ def run_eval(model, loader, device) -> tuple[float, float]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train PLANET to the harness contract")
+    parser = argparse.ArgumentParser(description="Train PLANET with an explicit training contract")
     parser.add_argument("--data-dir", required=True,
                         help="directory of <pdb>/<pdb>_pocket.h5 from preprocess.py")
     parser.add_argument("--train-labels", required=True, help="csv with complex_id,y_true")
@@ -162,7 +162,7 @@ def main() -> None:
                         help=f"default: the authors' {AUTHOR_LR}")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--init-encoder", default=None,
-                        help="encoder .pt from `gnnb encoder split`; makes this a fine-tune")
+                        help="encoder-only .pt (no head tensors); makes this a fine-tune")
     parser.add_argument("--freeze-encoder", action="store_true",
                         help="train the three heads only, against a fixed representation")
     parser.add_argument("--device", default="cuda:0")
@@ -269,7 +269,7 @@ def main() -> None:
                 best = {"epoch": epoch, "val_loss": val_loss, "val_r": val_r}
                 best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
-        # The first five keys are the harness's standard columns; the three after them are
+        # The first five keys are the generic columns; the three after them are
         # PLANET's own, because its loss is a sum of three objectives and a single number
         # hides which one moved.
         history.append({"epoch": epoch, "train_loss": train_loss, "train_r": train_r,

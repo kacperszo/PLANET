@@ -8,7 +8,7 @@ complex missing from its index, and nothing downstream reads it.
 Expects a directory already preprocessed into per-complex `<id>_pocket.h5` files.
 
 usage:
-    python predict_complexes.py --complexes DIR --model checkpoints_2020/PLANET.iter-145000 \
+    python predict_complexes.py --complexes DIR --model /path/to/checkpoint \
         --out /outputs/predictions.csv
 """
 

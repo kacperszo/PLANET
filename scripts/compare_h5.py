@@ -9,8 +9,8 @@ Usage:
 
 Example:
     uv run scripts/compare_h5.py 10gs \\
-        /home/kszot/gnns/PLANET_dataset/PDBbind2020-PLANET \\
-        /home/kszot/gnns/CASF-2013/coreset
+        /path/to/PLANET_dataset/PDBbind2020-PLANET \\
+        /path/to/CASF-2013/coreset
 """
 import argparse, hashlib, os, sys
 import h5py

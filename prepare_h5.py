@@ -1,8 +1,8 @@
 """Featurise the complexes named in a split into a reusable HDF5 cache.
 
 `preprocess.py` is the authors' entry point and it writes `<id>_pocket.h5` *inside each complex
-directory*. The harness mounts the dataset read-only on purpose — a model must never be able to
-mutate the corpus every other model is scored on — and the dataset is 11 GB over 17655 entries
+directory*. The dataset is best mounted read-only on purpose — a model should never be able to
+mutate the corpus it is scored on — and the dataset is 11 GB over 17655 entries
 while a split is a few thousand. Copying the corpus to preprocess it is the wrong trade twice.
 
 So this reads the split, reads each complex straight out of the read-only `/data`, and writes
